@@ -1,0 +1,13 @@
+# One-click relay on Render's free web service tier ("New > Blueprint" and pick this repo).
+# Your relay address is then wss://<service-name>.onrender.com
+services:
+  - type: web
+    name: lanbridge-relay
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: LANBRIDGE_RELAY_TOKEN
+        generateValue: true
+      - key: LANBRIDGE_TRUST_PROXY
+        value: "1"
