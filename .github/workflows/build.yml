@@ -1,0 +1,92 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Cross-compile
+        env:
+          DEFAULT_RELAY: ${{ vars.LANBRIDGE_DEFAULT_RELAY }}
+        run: ./scripts/build.sh "$(cat VERSION)" dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, file: lanbridge-linux-x64.tar.gz }
+          - { os: windows-latest, file: LANBridge-windows-x64.exe }
+          - { os: macos-latest, file: lanbridge-macos-arm64.tar.gz }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Run the built binary's self-test
+        shell: bash
+        run: |
+          cd dist
+          case "${{ matrix.file }}" in
+            *.tar.gz) tar -xzf "${{ matrix.file }}" && bin=./lanbridge ;;
+            *) bin="./${{ matrix.file }}" ;;
+          esac
+          "$bin" version
+          "$bin" selftest
+
+  release:
+    needs: [build, smoke]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Publish a release when VERSION is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$(cat VERSION)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Bump VERSION to publish a new one."
+            exit 0
+          fi
+          for s in install.sh install-relay.sh; do
+            sed "s#__REPO__#${GITHUB_REPOSITORY}#g" "scripts/$s" > "dist/$s"
+          done
+          sed "s#__REPO__#${GITHUB_REPOSITORY}#g" RELEASE_NOTES.md > "$RUNNER_TEMP/notes.md"
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          gh release create "$TAG" dist/* --title "LANBridge $TAG" --notes-file "$RUNNER_TEMP/notes.md" --target "$GITHUB_SHA"
