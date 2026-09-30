@@ -107,6 +107,9 @@ type Request struct {
 	System    string
 	Prompt    string
 	MaxTokens int
+	Schema    string // JSON schema for the answer; tools that support it enforce it
+	// Progress, if set, receives status lines from CLI tools while they work.
+	Progress func(line string)
 }
 
 // Response is a model's answer.
@@ -115,6 +118,7 @@ type Response struct {
 	Model        string
 	InputTokens  int
 	OutputTokens int
+	TotalTokens  int // when a tool only reports a total (the Codex CLI)
 	Took         time.Duration
 }
 

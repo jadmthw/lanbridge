@@ -52,6 +52,7 @@ type Entity struct {
 // PlayerPos is a real (human) player.
 type PlayerPos struct {
 	Name string      `json:"name"`
+	Yaw  float64     `json:"yaw"`
 	X    float64     `json:"x"`
 	Y    float64     `json:"y"`
 	Z    float64     `json:"z"`

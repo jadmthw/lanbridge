@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fakeAPI(t *testing.T, kind Kind) *httptest.Server {
@@ -141,5 +143,38 @@ printf '{"say":"from grok","actions":[]}'
 		if !strings.Contains(resp.Text, c.want) {
 			t.Fatalf("%s: got %q", c.kind, resp.Text)
 		}
+	}
+}
+
+func TestCodexProgressTokensAndKill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	dir := t.TempDir()
+	codex := filepath.Join(dir, "codex")
+	os.WriteFile(codex, []byte(`#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+cat > /dev/null
+echo "thinking about the roof" >&2
+if [ -f "$0.hang" ]; then sleep 60 & wait; fi
+printf '{"say":"ok","actions":[]}' > "$out"
+echo "tokens used" >&2
+echo "12,345" >&2
+`), 0o755)
+	var lines []string
+	p, _ := New(Config{Kind: OpenAI, Auth: AuthAccount, Command: codex})
+	resp, err := p.Generate(context.Background(), Request{Prompt: "p", Progress: func(l string) { lines = append(lines, l) }})
+	if err != nil || resp.TotalTokens != 12345 || len(lines) == 0 || lines[0] != "thinking about the roof" {
+		t.Fatalf("resp %+v err %v lines %v", resp, err, lines)
+	}
+	// A stuck run (a child process holding the pipes) must stop promptly when cancelled.
+	os.WriteFile(codex+".hang", nil, 0o644)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
+	start := time.Now()
+	_, err = p.Generate(ctx, Request{Prompt: "p"})
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 4*time.Second {
+		t.Fatalf("cancel took %s, err %v", time.Since(start), err)
 	}
 }

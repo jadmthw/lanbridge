@@ -121,6 +121,12 @@ func New(log *logx.Logger) (*App, error) {
 	if strings.TrimSpace(a.s.Name) == "" {
 		a.s.Name = defaultName()
 	}
+	if a.s.AI.Commands == "" {
+		a.s.AI.Commands = bots.PermHost
+	}
+	if a.s.AI.Builds == "" {
+		a.s.AI.Builds = bots.PermHost
+	}
 	a.ai = bots.NewManager(log, a.aiSettings)
 	return a, nil
 }
@@ -614,9 +620,12 @@ func (a *App) AIStop(name string) error { return a.ai.StopTask(name) }
 
 // AIOptions changes the AI limits.
 type AIOptions struct {
-	HostOnly  *bool `json:"hostOnly"`
-	MaxBots   *int  `json:"maxBots"`
-	MaxPerMin *int  `json:"maxPerMinute"`
+	HostOnly  *bool   `json:"hostOnly"`
+	MaxBots   *int    `json:"maxBots"`
+	MaxPerMin *int    `json:"maxPerMinute"`
+	Commands  *string `json:"commands"`
+	Builds    *string `json:"builds"`
+	ReplyAll  *bool   `json:"replyAll"`
 }
 
 // AISetOptions saves the AI limits.
@@ -631,6 +640,20 @@ func (a *App) AISetOptions(o AIOptions) error {
 			return errors.New("AI players: pick 1 to 20")
 		}
 		a.s.AI.MaxBots = *o.MaxBots
+	}
+	for _, p := range []*string{o.Commands, o.Builds} {
+		if p != nil && *p != bots.PermNobody && *p != bots.PermHost && *p != bots.PermEveryone {
+			return errors.New("unknown permission setting")
+		}
+	}
+	if o.Commands != nil {
+		a.s.AI.Commands = *o.Commands
+	}
+	if o.Builds != nil {
+		a.s.AI.Builds = *o.Builds
+	}
+	if o.ReplyAll != nil {
+		a.s.AI.ReplyAll = *o.ReplyAll
 	}
 	if o.MaxPerMin != nil {
 		if *o.MaxPerMin < 1 || *o.MaxPerMin > 120 {

@@ -17,6 +17,7 @@ type line struct {
 	at   time.Time
 	from string
 	text string
+	host bool
 }
 
 // Bot is one AI player.
@@ -51,6 +52,13 @@ type Bot struct {
 	callTimes []time.Time
 	walking   bool
 	sprinting bool
+	building  bool
+	stage     string
+	buildDesc string
+	buildFor  string
+	buildAt   time.Time
+	cancelB   context.CancelFunc
+	buildLog  []string
 	lastLook  time.Time
 	limitNote time.Time
 }
@@ -135,6 +143,9 @@ func (b *Bot) call(ctx context.Context, op string, args map[string]any, out any)
 
 // say posts a chat message as this AI player.
 func (b *Bot) say(text string) {
+	if b.ctx.Err() != nil {
+		return // removed from the world; stay quiet
+	}
 	for _, part := range chatLines(text) {
 		b.m.send("say", map[string]any{"name": b.Name, "text": part})
 		b.m.heard(b.Name, part, true)
@@ -178,6 +189,16 @@ func chatLines(s string) []string {
 	return out
 }
 
+// note adds a line only this AI player sees in its chat memory.
+func (b *Bot) note(text string) {
+	b.mu.Lock()
+	b.history = append(b.history, line{at: time.Now(), from: b.Name, text: text})
+	if len(b.history) > 24 {
+		b.history = b.history[len(b.history)-24:]
+	}
+	b.mu.Unlock()
+}
+
 func (b *Bot) setTask(t task) {
 	b.mu.Lock()
 	b.task, b.queue = t, nil
@@ -197,11 +218,15 @@ func (b *Bot) enqueue(t task) {
 	}
 }
 
-// StopTask cancels whatever the bot is doing.
+// StopTask cancels whatever the bot is doing, including a build.
 func (b *Bot) StopTask() {
 	b.mu.Lock()
 	b.task, b.queue = nil, nil
+	cancel := b.cancelB
 	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	b.stopAll()
 }
 
@@ -357,7 +382,7 @@ func (b *Bot) mind() {
 		b.mu.Lock()
 		b.thinking = true
 		b.mu.Unlock()
-		ctx, cancel := context.WithTimeout(b.ctx, 100*time.Second)
+		ctx, cancel := context.WithTimeout(b.ctx, 4*time.Minute)
 		resp, err := b.provider.Generate(ctx, ai.Request{System: b.systemPrompt(), Prompt: b.prompt(msgs), MaxTokens: 1500})
 		cancel()
 		b.mu.Lock()
@@ -368,7 +393,7 @@ func (b *Bot) mind() {
 		} else {
 			b.lastErr = ""
 			b.tokensIn += resp.InputTokens
-			b.tokensOut += resp.OutputTokens
+			b.tokensOut += resp.OutputTokens + resp.TotalTokens
 		}
 		b.mu.Unlock()
 		if b.ctx.Err() != nil {
@@ -383,6 +408,9 @@ func (b *Bot) mind() {
 		if rep.Say != "" {
 			b.say(rep.Say)
 		}
+		host := msgs[len(msgs)-1].host
+		b.doCommands(b.ctx, rep.Commands, from, host)
+		b.build(rep.Build, rep.BuildCmds, rep.BuildAt, from, msgs[len(msgs)-1].text, host)
 		for _, a := range rep.Actions {
 			t, err := parseAction(a, from, b.m.playerNames())
 			if err != nil {
@@ -421,22 +449,29 @@ Personality: %s
 How to reply:
 - Write like a Minecraft player in chat: short and casual, at most 2 sentences, no markdown.
 - Keep it friendly and fine for all ages.
-- You can act in the world with the actions below. Use them when someone asks you to do something. Don't claim you did something unless you include the action for it.
+- Only real people talk to you; other AI players' messages are shown for context, don't answer them.
+- If a message clearly isn't meant for you, you can stay quiet: empty "say" and nothing else.
+- Don't claim you did something unless you include the action, command or build for it.
 
-Actions (strings):
+Actions you can take with your body (strings in "actions"):
   "follow <player>"               walk after a player until told to stop
   "come <player>"                 teleport next to a player right away
   "goto <x> <y> <z>"              walk to coordinates
   "stop"                          stop what you're doing
-  "collect <block> <count>"       mine blocks nearby, e.g. "collect oak_log 8", "collect stone 16", "collect iron_ore 3"; "log" means any log
-  "attack <mob>"                  fight the nearest mob of that type, e.g. "attack zombie"; "attack hostile" for any monster
-  "give <player> <item> <count>"  toss items from your inventory, e.g. "give Max oak_log 4"
-  "equip <item>"                  hold an item
-  "eat"                           eat food from your inventory
-  "look <player>", "jump", "sneak", "unsneak"
+  "collect <block> <count>"       mine blocks nearby, e.g. "collect oak_log 8"; "log" means any log
+  "attack <mob>"                  fight the nearest mob of that type; "attack hostile" for any monster
+  "give <player> <item> <count>"  toss items from your inventory
+  "equip <item>", "eat", "look <player>", "jump", "sneak", "unsneak"
+
+Commands ("commands"): vanilla Minecraft commands without the slash, run as you, so @s and ~ ~ ~ mean you.
+  Examples: "time set day", "weather clear", "give Max diamond 3", "effect give Max minecraft:speed 60 1", "summon minecraft:cat ~ ~ ~".
+  Only use them when the person asking is allowed to (see "Permissions" in the message).
+
+Building ("build"): when someone asks you to build something, put a detailed description of it in "build": what it is, style, rough size in blocks, materials and colors, rooms and features. Fill in sensible details they didn't mention. An architect step then surveys the ground and designs it for you, so don't write commands for builds. Keep "say" short, like "On it, give me a minute!"; you'll announce it when it's done.
+  "build_at": "" builds in front of the person asking; a player name builds in front of them; "x y z" builds at those coordinates.
 
 Answer with only this JSON object and nothing else:
-{"say": "<your chat message, or empty>", "actions": ["<action>", ...]}`, b.Name, info.Name, info.Vendor, persona)
+{"say": "<chat message, or empty>", "actions": [], "commands": [], "build": "", "build_at": ""}`, b.Name, info.Name, info.Vendor, persona)
 }
 
 func (b *Bot) prompt(msgs []line) string {
@@ -449,6 +484,13 @@ func (b *Bot) prompt(msgs []line) string {
 		sb.WriteString(st.Summary(b.Name))
 	} else {
 		sb.WriteString("You just joined the world.")
+	}
+	b.mu.Lock()
+	building, desc, forWho, stage, since := b.building, b.buildDesc, b.buildFor, b.stage, b.buildAt
+	b.mu.Unlock()
+	if building {
+		fmt.Fprintf(&sb, "\nYOU ARE BUSY BUILDING: %q for %s (%s, started %s ago). You can't start another build until it's finished, so leave \"build\" empty. If someone asks what you're doing or about the build, tell them how it's going. If they want you to stop or cancel it, add the action \"stop\".",
+			desc, forWho, stage, time.Since(since).Round(time.Second))
 	}
 	sb.WriteString("\nCurrent task: ")
 	if tk != nil {
@@ -472,6 +514,7 @@ func (b *Bot) prompt(msgs []line) string {
 			sb.WriteString("<" + l.from + "> " + l.text + "\n")
 		}
 	}
+	sb.WriteString(b.permissions(msgs[len(msgs)-1], st))
 	sb.WriteString("\nNew message(s) for you:\n")
 	for _, m := range msgs {
 		sb.WriteString("<" + m.from + "> " + m.text + "\n")
@@ -479,9 +522,37 @@ func (b *Bot) prompt(msgs []line) string {
 	return sb.String()
 }
 
+// permissions tells the model what the person asking may request.
+func (b *Bot) permissions(last line, st *State) string {
+	set := b.m.settings()
+	can := func(ok bool) string {
+		if ok {
+			return "may"
+		}
+		return "may NOT"
+	}
+	role := "a guest"
+	if last.host {
+		role = "the host"
+	}
+	s := fmt.Sprintf("\nPermissions: %s is %s. They %s ask you to run commands, and %s ask you to build.",
+		last.from, role, can(permitted(set.Commands, last.host)), can(permitted(set.Builds, last.host)))
+	if st != nil {
+		if p := st.player(last.from); p != nil {
+			dir, _, _ := facing(p.Yaw)
+			s += fmt.Sprintf(" %s is at x=%d, y=%d, z=%d, facing %s.", p.Name, int(math.Floor(p.X)), int(math.Floor(p.Y)), int(math.Floor(p.Z)), dir)
+		}
+	}
+	return s + "\n"
+}
+
 type reply struct {
-	Say     string
-	Actions []string
+	Say       string
+	Actions   []string
+	Commands  []string
+	Build     string   // what to build, for the architect
+	BuildCmds []string // ready-made build commands (older answer format)
+	BuildAt   string
 }
 
 // parseReply reads the model's JSON answer, tolerating code fences, extra
@@ -490,11 +561,30 @@ func parseReply(s string) reply {
 	s = strings.TrimSpace(s)
 	if i, j := strings.Index(s, "{"), strings.LastIndex(s, "}"); i >= 0 && j > i {
 		var raw struct {
-			Say     string            `json:"say"`
-			Actions []json.RawMessage `json:"actions"`
+			Say      string            `json:"say"`
+			Actions  []json.RawMessage `json:"actions"`
+			Commands []string          `json:"commands"`
+			Build    json.RawMessage   `json:"build"`
+			BuildAt  string            `json:"build_at"`
 		}
 		if json.Unmarshal([]byte(s[i:j+1]), &raw) == nil {
-			r := reply{Say: strings.TrimSpace(raw.Say)}
+			r := reply{Say: strings.TrimSpace(raw.Say), BuildAt: raw.BuildAt}
+			for _, c := range raw.Commands {
+				if c = strings.TrimSpace(c); c != "" {
+					r.Commands = append(r.Commands, c)
+				}
+			}
+			var desc string
+			var cmds []string
+			if json.Unmarshal(raw.Build, &desc) == nil {
+				r.Build = strings.TrimSpace(desc)
+			} else if json.Unmarshal(raw.Build, &cmds) == nil {
+				for _, c := range cmds {
+					if c = strings.TrimSpace(c); c != "" {
+						r.BuildCmds = append(r.BuildCmds, c)
+					}
+				}
+			}
 			for _, a := range raw.Actions {
 				var str string
 				if json.Unmarshal(a, &str) == nil {
@@ -548,20 +638,21 @@ func objectAction(o map[string]any) string {
 
 // BotStatus is shown in the control panel.
 type BotStatus struct {
-	Name      string  `json:"name"`
-	Kind      ai.Kind `json:"kind"`
-	Model     string  `json:"model"`
-	Persona   string  `json:"persona,omitempty"`
-	Online    bool    `json:"online"`
-	Task      string  `json:"task"`
-	Thinking  bool    `json:"thinking"`
-	LastSaid  string  `json:"lastSaid,omitempty"`
-	Calls     int     `json:"calls"`
-	TokensIn  int     `json:"tokensIn"`
-	TokensOut int     `json:"tokensOut"`
-	LastError string  `json:"lastError,omitempty"`
-	Health    float64 `json:"health"`
-	Food      float64 `json:"food"`
+	Name      string   `json:"name"`
+	Kind      ai.Kind  `json:"kind"`
+	Model     string   `json:"model"`
+	Persona   string   `json:"persona,omitempty"`
+	Online    bool     `json:"online"`
+	Task      string   `json:"task"`
+	Thinking  bool     `json:"thinking"`
+	LastSaid  string   `json:"lastSaid,omitempty"`
+	Calls     int      `json:"calls"`
+	TokensIn  int      `json:"tokensIn"`
+	TokensOut int      `json:"tokensOut"`
+	LastError string   `json:"lastError,omitempty"`
+	BuildLog  []string `json:"buildLog,omitempty"`
+	Health    float64  `json:"health"`
+	Food      float64  `json:"food"`
 }
 
 func (b *Bot) status() BotStatus {
@@ -572,8 +663,15 @@ func (b *Bot) status() BotStatus {
 	if b.task != nil {
 		s.Task = b.task.desc()
 	}
+	if b.building {
+		s.Task = "building"
+		if b.stage != "" {
+			s.Task = b.stage
+		}
+	}
 	if b.state != nil {
 		s.Health, s.Food = b.state.Health, b.state.Food
 	}
+	s.BuildLog = append([]string(nil), b.buildLog...)
 	return s
 }

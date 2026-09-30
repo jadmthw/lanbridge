@@ -8,13 +8,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // ReplySchema is the JSON shape AI players answer with.
-const ReplySchema = `{"type":"object","properties":{"say":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}}},"required":["say","actions"],"additionalProperties":false}`
+const ReplySchema = `{"type":"object","properties":{"say":{"type":"string"},"actions":{"type":"array","items":{"type":"string"}},"commands":{"type":"array","items":{"type":"string"}},"build":{"type":"string"},"build_at":{"type":"string"}},"required":["say","actions","commands","build","build_at"],"additionalProperties":false}`
+
+// BuildSchema is the JSON shape of an architect's build plan.
+const BuildSchema = `{"type":"object","properties":{"title":{"type":"string"},"commands":{"type":"array","items":{"type":"string"}}},"required":["title","commands"],"additionalProperties":false}`
 
 // codexCLI runs OpenAI's Codex CLI, which bills the user's ChatGPT plan when
 // they signed in with "codex login".
@@ -40,8 +46,27 @@ func (c *codexCLI) Generate(ctx context.Context, req Request) (Response, error) 
 	}
 	defer os.RemoveAll(dir)
 	schema, out := filepath.Join(dir, "schema.json"), filepath.Join(dir, "reply.txt")
-	if err := os.WriteFile(schema, []byte(ReplySchema), 0o600); err != nil {
+	sch := req.Schema
+	if sch == "" {
+		sch = ReplySchema
+	}
+	if err := os.WriteFile(schema, []byte(sch), 0o600); err != nil {
 		return Response{}, err
+	}
+	var tokens int
+	var lines []string
+	track := func(line string) {
+		if n := tokensUsed(line); n > 0 {
+			tokens = n
+		} else if len(lines) > 0 && strings.EqualFold(lines[len(lines)-1], "tokens used") {
+			if n, err := strconv.Atoi(strings.ReplaceAll(strings.TrimSpace(line), ",", "")); err == nil {
+				tokens = n
+			}
+		}
+		lines = append(lines, line)
+		if req.Progress != nil {
+			req.Progress(line)
+		}
 	}
 	run := func(simple bool) (string, error) {
 		args := []string{"exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "-o", out}
@@ -52,7 +77,7 @@ func (c *codexCLI) Generate(ctx context.Context, req Request) (Response, error) 
 			args = append(args, "--model", c.model)
 		}
 		args = append(args, "-")
-		return runCLI(ctx, c.path, dir, args, req.System+"\n\n"+req.Prompt, out)
+		return runCLI(ctx, c.path, dir, args, req.System+"\n\n"+req.Prompt, out, track)
 	}
 	text, err := run(c.simple.Load())
 	if err != nil && !c.simple.Load() && looksLikeFlagError(err) {
@@ -60,9 +85,12 @@ func (c *codexCLI) Generate(ctx context.Context, req Request) (Response, error) 
 		text, err = run(true)
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return Response{}, err
+		}
 		return Response{}, explainCLI("codex", "codex login", err)
 	}
-	return Response{Text: text, Model: firstNonEmpty(c.model, "codex default"), Took: time.Since(start)}, nil
+	return Response{Text: text, Model: firstNonEmpty(c.model, "codex default"), Took: time.Since(start), TotalTokens: tokens}, nil
 }
 
 // grokCLI runs xAI's Grok Build CLI, which bills the user's SuperGrok or X
@@ -103,7 +131,7 @@ func (g *grokCLI) Generate(ctx context.Context, req Request) (Response, error) {
 		if g.model != "" {
 			args = append(args, "--model", g.model)
 		}
-		return runCLI(ctx, g.path, dir, args, "", "")
+		return runCLI(ctx, g.path, dir, args, "", "", req.Progress)
 	}
 	text, err := run(g.simple.Load())
 	if err != nil && !g.simple.Load() && looksLikeFlagError(err) {
@@ -111,6 +139,9 @@ func (g *grokCLI) Generate(ctx context.Context, req Request) (Response, error) {
 		text, err = run(true)
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return Response{}, err
+		}
 		return Response{}, explainCLI("grok", "grok login", err)
 	}
 	return Response{Text: text, Model: firstNonEmpty(g.model, "grok default"), Took: time.Since(start)}, nil
@@ -123,8 +154,11 @@ type cliError struct {
 
 func (e *cliError) Error() string {
 	s := strings.TrimSpace(e.stderr)
-	if len(s) > 400 {
-		s = s[len(s)-400:]
+	if i := strings.LastIndex(s, "\n"); i >= 0 && len(s) > 200 {
+		s = strings.TrimSpace(s[i:]) // the last line usually says what went wrong
+	}
+	if len(s) > 200 {
+		s = s[:200] + "…"
 	}
 	if s == "" {
 		return e.err.Error()
@@ -134,16 +168,22 @@ func (e *cliError) Error() string {
 
 // runCLI runs a tool in an empty scratch folder and returns its answer, read
 // from outFile if given, else from stdout.
-func runCLI(ctx context.Context, path, dir string, args []string, stdin, outFile string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
+func runCLI(ctx context.Context, path, dir string, args []string, stdin, outFile string, progress func(string)) (string, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, path, args...)
+	prepare(cmd)
+	cmd.WaitDelay = 5 * time.Second // don't wait forever on pipes held open by grandchildren
 	cmd.Dir = dir
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	var stdout bytes.Buffer
+	stderr := &lineWriter{progress: progress}
+	cmd.Stdout, cmd.Stderr = &stdout, stderr
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "CI=1")
 	err := cmd.Run()
 	text := stdout.String()
@@ -158,10 +198,60 @@ func runCLI(ctx context.Context, path, dir string, args []string, stdin, outFile
 	if err == nil {
 		err = errors.New("no answer")
 	}
-	if ctx.Err() != nil {
-		err = errors.New("timed out")
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
+		return "", context.Canceled
+	case ctx.Err() != nil:
+		return "", errors.New("timed out")
 	}
-	return "", &cliError{err: err, stderr: stderr.String() + "\n" + stdout.String()}
+	return "", &cliError{err: err, stderr: stderr.String()}
+}
+
+// lineWriter collects a tool's stderr and passes each line on as progress.
+type lineWriter struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	partial  []byte
+	progress func(string)
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.buf.Len() < 256<<10 {
+		w.buf.Write(p)
+	}
+	w.partial = append(w.partial, p...)
+	for {
+		i := bytes.IndexByte(w.partial, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimSpace(string(w.partial[:i]))
+		w.partial = w.partial[i+1:]
+		if line != "" && w.progress != nil {
+			w.progress(line)
+		}
+	}
+	return len(p), nil
+}
+
+func (w *lineWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+var tokensRe = regexp.MustCompile(`(?i)tokens used\D{0,12}([\d,]+)`)
+
+// tokensUsed finds the "tokens used" total the Codex CLI prints when it finishes.
+func tokensUsed(stderr string) int {
+	m := tokensRe.FindAllStringSubmatch(stderr, -1)
+	if len(m) == 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.ReplaceAll(m[len(m)-1][1], ",", ""))
+	return n
 }
 
 func looksLikeFlagError(err error) bool {

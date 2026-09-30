@@ -15,7 +15,8 @@ import (
 )
 
 // fakeApp plays the part of lanbridge.sc: heartbeat, commands in, events out.
-func fakeApp(t *testing.T, dir string, stop <-chan struct{}) {
+func fakeApp(t *testing.T, dir string, stop <-chan struct{}) <-chan struct{} {
+	done := make(chan struct{})
 	os.MkdirAll(filepath.Join(dir, "in"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "out"), 0o755)
 	write := func(name string, v any) {
@@ -25,6 +26,7 @@ func fakeApp(t *testing.T, dir string, stop <-chan struct{}) {
 	write("hello.json", map[string]any{"v": 1, "session": "s1", "world": "Test World", "players": []string{"Max"}})
 	seq := 0
 	go func() {
+		defer close(done)
 		tick := time.NewTicker(50 * time.Millisecond)
 		defer tick.Stop()
 		for {
@@ -62,13 +64,14 @@ func fakeApp(t *testing.T, dir string, stop <-chan struct{}) {
 			}
 		}
 	}()
+	return done
 }
 
 func TestClientRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "saves", "w", "scripts", AppName+".data")
 	stop := make(chan struct{})
-	defer close(stop)
-	fakeApp(t, dir, stop)
+	done := fakeApp(t, dir, stop)
+	defer func() { close(stop); <-done }()
 	c, err := Open(dir, logx.Discard())
 	if err != nil {
 		t.Fatal(err)
