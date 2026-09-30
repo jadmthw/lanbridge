@@ -162,6 +162,8 @@ footer { display: flex; justify-content: space-between; align-items: center; mar
 }
 
 /* AI players page */
+.steps .list li { padding-left: 14px; counter-increment: none; }
+.steps .list li::before { content: none; display: none; }
 .top0 { margin-top: 0; }
 .steps li + li { margin-top: 12px; }
 .list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 10px; }
@@ -180,6 +182,7 @@ details.inline { margin-top: 10px; }
 details.inline summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
 details.inline .row { margin-top: 8px; flex-wrap: nowrap; }
 .toast.bad { border-left-color: var(--redstone); }
+.buildlog pre { margin: 6px 0 0; padding: 10px; background: var(--well); border-radius: 8px; font: 12px/1.5 var(--mono); white-space: pre-wrap; max-height: 260px; overflow: auto; }
 @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -195,7 +198,7 @@ details.inline .row { margin-top: 8px; flex-wrap: nowrap; }
 
   <section class="panel">
     <h1>AI players</h1>
-    <p class="lede">Bring GPT, Claude, Grok or Gemini into your world as players. Everyone in the world can talk to them in chat, and they can follow you, mine, fight and hand you things.</p>
+    <p class="lede">Bring GPT, Claude, Grok or Gemini into your world as players. Everyone in the world can talk to them in chat, and they can follow you, mine, fight, build, run commands and hand you things.</p>
   </section>
 
   <section class="panel">
@@ -241,15 +244,21 @@ details.inline .row { margin-top: 8px; flex-wrap: nowrap; }
   </section>
 
   <details class="more" id="limits">
-    <summary>Limits</summary>
+    <summary>Permissions and limits</summary>
     <div class="inner">
+      <label class="check"><input type="checkbox" id="o-reply"> Answer chat that doesn't name an AI player (the closest one replies)</label>
+      <div class="grid2">
+        <div class="field"><label for="o-cmds">Who can ask them to run commands</label><select class="slot" id="o-cmds"><option value="off">Nobody</option><option value="host">Only me (the host)</option><option value="everyone">Everyone in the world</option></select></div>
+        <div class="field"><label for="o-builds">Who can ask them to build</label><select class="slot" id="o-builds"><option value="off">Nobody</option><option value="host">Only me (the host)</option><option value="everyone">Everyone in the world</option></select></div>
+      </div>
+      <p class="hint top0">Commands run with operator powers, so "Everyone" lets friends get items, change the time or teleport through the AI. Server-breaking commands like op, stop, ban and script are always blocked.</p>
       <label class="check"><input type="checkbox" id="o-host"> Only the host can add or remove AI players from chat</label>
       <div class="grid2">
         <div class="field"><label for="o-max">Most AI players at once</label><input class="slot" id="o-max" type="number" min="1" max="20"></div>
         <div class="field"><label for="o-rate">Replies per AI player per minute</label><input class="slot" id="o-rate" type="number" min="1" max="120"></div>
       </div>
       <p class="hint top0">Every reply is a model call, so these keep your credits or plan usage in check.</p>
-      <button class="btn ghost" id="o-save">Save limits</button>
+      <button class="btn ghost" id="o-save">Save</button>
     </div>
   </details>
 </div>
@@ -262,6 +271,7 @@ const $ = (id) => document.getElementById(id);
 const token = location.hash.slice(1);
 $("back").href = "/#" + token;
 let st = null, failures = 0, formsBuilt = false, limitsFilled = false;
+const openLogs = new Set();
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -306,7 +316,15 @@ async function run(btn, fn) {
 
 function renderWorld() {
   const setup = $("setup");
-  if (st.connected) {
+  if (st.connected && st.outdated) {
+    $("w-sq").className = "sq bad";
+    $("w-text").textContent = `"${st.world}" is running an older copy of LANBridge's script, so building and commands won't work. Click Reinstall below, then type ${st.command} in the game.`;
+    setup.hidden = false;
+  } else if (st.connected && st.paused) {
+    $("w-sq").className = "sq wait";
+    $("w-text").textContent = `"${st.world}" is paused. Single-player worlds pause when Minecraft isn't the active window. Go back to the game, or open the world to LAN (or press F3+P in game) so it keeps running while you're here.`;
+    setup.hidden = true;
+  } else if (st.connected) {
     $("w-sq").className = "sq ok";
     const who = st.players.length ? "Players: " + st.players.join(", ") : "No players yet";
     $("w-text").textContent = `Connected to "${st.world}". ${who}.`;
@@ -350,7 +368,11 @@ function providerForm(p) {
   const acct = el("p", { class: "hint top0", "data-role": "acct" });
   const note = p.accountNote ? el("p", { class: "hint top0" }, p.accountNote) : null;
   const test = el("span", { class: "meta", "data-role": "test" });
-  const sync = () => { keyRow.hidden = auth.value !== "api"; acct.hidden = auth.value !== "account"; };
+  const sync = () => {
+    keyRow.hidden = auth.value !== "api";
+    acct.hidden = auth.value !== "account";
+    model.placeholder = auth.value === "account" ? "Leave empty to use " + p.accountCli + "'s default model" : (p.defaultModel || "Leave empty for the default");
+  };
   auth.addEventListener("change", sync);
   sync();
   const save = el("button", { class: "btn primary", onclick: (e) => run(e.target, async () => {
@@ -369,8 +391,8 @@ function providerForm(p) {
     await api("/api/ai/provider", { kind: p.kind, remove: true });
     toast(p.name + " removed.");
   }) }, "Remove");
-  wrap.append(head, note, el("div", { class: "field" }, el("label", {}, "Pay with"), auth), keyRow, acct,
-    el("div", { class: "field" }, el("label", {}, "Model"), model, dl), el("div", { class: "row" }, save, tst, remove, test));
+  wrap.append(...[head, note, el("div", { class: "field" }, el("label", {}, "Pay with"), auth), keyRow, acct,
+    el("div", { class: "field" }, el("label", {}, "Model"), model, dl), el("div", { class: "row" }, save, tst, remove, test)].filter(Boolean));
   return wrap;
 }
 
@@ -422,7 +444,10 @@ function renderBots() {
         el("div", { class: "meta" }, bits.join(", ")),
         b.thinking ? el("div", { class: "meta" }, "Thinking…") : null,
         b.lastSaid ? el("div", { class: "said" }, "\u201C" + b.lastSaid + "\u201D") : null,
-        b.lastError ? el("div", { class: "err" }, b.lastError) : null),
+        b.lastError ? el("div", { class: "err" }, b.lastError) : null,
+        b.buildLog && b.buildLog.length ? el("details", { class: "inline buildlog", open: openLogs.has(b.name) ? true : null,
+          ontoggle: (e) => e.target.open ? openLogs.add(b.name) : openLogs.delete(b.name) },
+          el("summary", {}, "Build log"), el("pre", {}, b.buildLog.join("\n"))) : null),
       el("button", { class: "btn ghost", onclick: (e) => run(e.target, () => api("/api/ai/stop", { name: b.name })) }, "Stop task"),
       el("button", { class: "btn ghost", onclick: (e) => run(e.target, () => api("/api/ai/remove", { name: b.name })) }, "Remove"));
   }));
@@ -432,6 +457,9 @@ function renderLimits() {
   if (limitsFilled) return;
   limitsFilled = true;
   $("o-host").checked = st.hostOnly;
+  $("o-reply").checked = st.replyAll;
+  $("o-cmds").value = st.commands || "host";
+  $("o-builds").value = st.builds || "host";
   $("o-max").value = st.maxBots;
   $("o-rate").value = st.maxPerMinute;
 }
@@ -464,8 +492,9 @@ $("folder-add").addEventListener("click", (e) => run(e.target, async () => {
   toast("Folder added.");
 }));
 $("o-save").addEventListener("click", (e) => run(e.target, async () => {
-  await api("/api/ai/options", { hostOnly: $("o-host").checked, maxBots: +$("o-max").value, maxPerMinute: +$("o-rate").value });
-  toast("Limits saved.");
+  await api("/api/ai/options", { hostOnly: $("o-host").checked, maxBots: +$("o-max").value, maxPerMinute: +$("o-rate").value,
+    commands: $("o-cmds").value, builds: $("o-builds").value, replyAll: $("o-reply").checked });
+  toast("Saved.");
 }));
 if (!token) $("offline").textContent = "Open this page from LANBridge's main window.";
 poll();

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -23,11 +24,16 @@ type Settings struct {
 	HostOnly  bool                  `json:"hostOnly"`     // only the world's host may add or remove AI players from chat
 	MaxBots   int                   `json:"maxBots"`      // at most this many AI players at once
 	MaxPerMin int                   `json:"maxPerMinute"` // replies per AI player per minute (protects your credits)
+	Commands  string                `json:"commands"`     // who may ask for commands: off, host, everyone
+	Builds    string                `json:"builds"`       // who may ask for builds: off, host, everyone
+	ReplyAll  bool                  `json:"replyAll"`     // answer chat that doesn't name an AI player
 	Folders   []string              `json:"folders,omitempty"`
 }
 
 // DefaultSettings are the out-of-the-box limits.
-func DefaultSettings() Settings { return Settings{HostOnly: true, MaxBots: 4, MaxPerMin: 10} }
+func DefaultSettings() Settings {
+	return Settings{HostOnly: true, MaxBots: 4, MaxPerMin: 10, Commands: PermHost, Builds: PermHost, ReplyAll: true}
+}
 
 // link is the part of *bridge.Client the manager uses.
 type link interface {
@@ -127,6 +133,9 @@ func (m *Manager) run() {
 				m.mu.Lock()
 				m.hello = h
 				m.mu.Unlock()
+			} else if dir, _, ok := bridge.Active(m.settings().Folders); ok && dir != c.Dir {
+				c.Close() // a different world is running now
+				m.disconnected(c)
 			}
 		}
 	}
@@ -144,9 +153,27 @@ func (m *Manager) connect() {
 		m.mu.Unlock()
 		return
 	}
+	fakes := map[string]bool{}
+	for _, f := range h.Fakes {
+		fakes[strings.ToLower(f)] = true
+	}
 	m.mu.Lock()
 	m.client, m.link, m.hello, m.since, m.lastErr = c, c, h, time.Now(), ""
+	var gone []*Bot
+	for k, b := range m.bots {
+		if fakes[k] {
+			b.mu.Lock()
+			b.online = true
+			b.mu.Unlock()
+		} else {
+			delete(m.bots, k)
+			gone = append(gone, b)
+		}
+	}
 	m.mu.Unlock()
+	for _, b := range gone {
+		b.stop()
+	}
 	m.log.Infof("AI players: connected to Minecraft world %q", h.World)
 }
 
@@ -160,13 +187,13 @@ func (m *Manager) disconnected(c *bridge.Client) {
 	if err := c.Err(); err != nil && !errors.Is(err, bridge.ErrClosed) {
 		m.lastErr = err.Error()
 	}
-	bots := m.bots
-	m.bots = map[string]*Bot{}
-	m.mu.Unlock()
-	for _, b := range bots {
-		b.stop()
+	for _, b := range m.bots {
+		b.mu.Lock()
+		b.online = false // kept, in case the same world comes back
+		b.mu.Unlock()
 	}
-	m.log.Infof("AI players: the Minecraft world closed")
+	m.mu.Unlock()
+	m.log.Infof("AI players: lost the Minecraft world (closed, or paused for a long time)")
 }
 
 // attach connects the manager to a link directly (tests).
@@ -341,10 +368,33 @@ func (m *Manager) addressed(from, text string) []*Bot {
 			}
 		}
 	}
+	if len(out) == 0 && m.settings().ReplyAll {
+		out = []*Bot{nearestBot(bots, from)}
+	}
 	if len(out) == 1 {
 		m.sticky[strings.ToLower(from)] = sticky{bot: out[0].Name, at: time.Now()}
 	}
 	return out
+}
+
+// nearestBot picks the AI player closest to a speaker, to answer chat that
+// wasn't aimed at anyone in particular.
+func nearestBot(bots []*Bot, speaker string) *Bot {
+	best, bestD := bots[0], math.MaxFloat64
+	for _, b := range bots {
+		b.mu.Lock()
+		st := b.state
+		b.mu.Unlock()
+		if st == nil {
+			continue
+		}
+		if p := st.player(speaker); p != nil && p.Dim == st.Dim {
+			if d := st.dist(p.X, p.Y, p.Z); d < bestD {
+				best, bestD = b, d
+			}
+		}
+	}
+	return best
 }
 
 func (m *Manager) onChat(from string, host bool, text string) {
@@ -357,7 +407,7 @@ func (m *Manager) onChat(from string, host bool, text string) {
 	for _, b := range m.addressed(from, text) {
 		to[b] = true
 	}
-	l := line{at: time.Now(), from: from, text: text}
+	l := line{at: time.Now(), from: from, text: text, host: host}
 	for _, b := range m.allBots() {
 		b.hear(l, to[b])
 	}
@@ -462,11 +512,14 @@ var reserved = map[string]bool{"all": true, "survival": true, "creative": true, 
 // Spawn adds an AI player to the connected world and returns its name.
 func (m *Manager) Spawn(req SpawnRequest) (string, error) {
 	m.mu.Lock()
-	connected := m.link != nil
+	connected, client := m.link != nil, m.client
 	count := len(m.bots)
 	m.mu.Unlock()
 	if !connected {
 		return "", errors.New("no Minecraft world is connected. Open your world (with Carpet) and run /script load lanbridge")
+	}
+	if client != nil && client.Paused() {
+		return "", bridge.ErrPaused
 	}
 	s := m.settings()
 	if s.MaxBots > 0 && count >= s.MaxBots {
@@ -487,6 +540,9 @@ func (m *Manager) Spawn(req SpawnRequest) (string, error) {
 	}
 	if !nameRe.MatchString(name) || reserved[strings.ToLower(name)] {
 		return "", errors.New("names need 3-16 letters, numbers or underscores")
+	}
+	if offensiveName(name) {
+		return "", errors.New("pick a different name for this AI player")
 	}
 	for _, p := range m.playerNames() {
 		if strings.EqualFold(p, name) {
@@ -635,6 +691,8 @@ type ProviderStatus struct {
 // Status is everything the AI page shows.
 type Status struct {
 	Connected bool              `json:"connected"`
+	Paused    bool              `json:"paused"`
+	Outdated  bool              `json:"outdated"`
 	World     string            `json:"world,omitempty"`
 	Players   []string          `json:"players"`
 	Since     time.Time         `json:"since"`
@@ -646,6 +704,9 @@ type Status struct {
 	HostOnly  bool              `json:"hostOnly"`
 	MaxBots   int               `json:"maxBots"`
 	MaxPerMin int               `json:"maxPerMinute"`
+	Commands  string            `json:"commands"`
+	Builds    string            `json:"builds"`
+	ReplyAll  bool              `json:"replyAll"`
 }
 
 // Status returns a snapshot for the control panel.
@@ -653,8 +714,9 @@ func (m *Manager) Status() Status {
 	m.Touch()
 	s := m.settings()
 	m.mu.Lock()
-	st := Status{Connected: m.link != nil, World: m.hello.World, Players: append([]string{}, m.hello.Players...), Since: m.since,
-		Error: m.lastErr, Command: "/script load " + bridge.AppName, HostOnly: s.HostOnly, MaxBots: s.MaxBots, MaxPerMin: s.MaxPerMin}
+	st := Status{Connected: m.link != nil, Paused: m.client != nil && m.client.Paused(), World: m.hello.World, Players: append([]string{}, m.hello.Players...), Since: m.since,
+		Error: m.lastErr, Command: "/script load " + bridge.AppName, HostOnly: s.HostOnly, MaxBots: s.MaxBots, MaxPerMin: s.MaxPerMin,
+		Commands: s.Commands, Builds: s.Builds, ReplyAll: s.ReplyAll}
 	if time.Since(m.instTime) > 5*time.Second {
 		m.instances, m.instTime = nil, time.Now()
 		m.mu.Unlock()
@@ -670,6 +732,10 @@ func (m *Manager) Status() Status {
 	m.mu.Unlock()
 	if !st.Connected {
 		st.World, st.Players = "", []string{}
+	} else {
+		m.mu.Lock()
+		st.Outdated = m.hello.V < bridge.ScriptVersion
+		m.mu.Unlock()
 	}
 	for _, info := range ai.Infos() {
 		ps := ProviderStatus{Info: info, Auth: ai.AuthAPIKey, LastTest: tests[info.Kind]}

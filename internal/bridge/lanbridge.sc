@@ -15,11 +15,12 @@ global_session = str(unix_time());
 global_seq = 0;
 global_ticks = 0;
 global_out = [];
+global_blocked = ['op', 'deop', 'stop', 'ban', 'ban-ip', 'banlist', 'pardon', 'pardon-ip', 'kick', 'whitelist', 'reload', 'script', 'carpet', 'player', 'publish', 'save-off', 'save-on', 'save-all', 'datapack', 'debug', 'perf', 'jfr', 'transfer', 'function', 'setidletimeout', 'defaultgamemode'];
 global_allowed = '^(stop|use|jump|attack|drop|dropStack|swapHands|hotbar|sneak|unsneak|sprint|unsprint|look|turn|move)( [A-Za-z0-9 ._:~^-]{0,80})?$';
 
 __on_start() -> (
     old = list_files('in', 'json');
-    if (old, for (old, delete_file(slice(_, 0, length(_) - 5), 'json')));
+    if (old, for (old, delete_file(lb_res(_), 'json')));
     lb_hello();
     for (player('all'),
         if (_~'player_type' != 'fake', print(_, '[LANBridge] AI bridge loaded. Add AI players in the LANBridge app, or type !ai help'))
@@ -39,7 +40,7 @@ lb_hello() -> (
     everyone = player('all');
     real = filter(everyone, _~'player_type' != 'fake');
     write_file('hello', 'json', {
-        'v' -> 1,
+        'v' -> 3,
         'session' -> global_session,
         'time' -> unix_time(),
         'world' -> system_info('world_name'),
@@ -66,7 +67,7 @@ lb_poll() -> (
     files = list_files('in', 'json');
     if (files,
         for (sort(files),
-            nm = slice(_, 0, length(_) - 5);
+            nm = lb_res(_);
             batch = try(read_file(nm, 'json'), 'exception', null);
             delete_file(nm, 'json');
             if (type(batch) == 'map' && type(batch:'cmds') == 'list',
@@ -75,6 +76,10 @@ lb_poll() -> (
         )
     )
 );
+
+// list_files names files without their extension; strip one anyway if a
+// Carpet version ever includes it.
+lb_res(f) -> if (length(f) > 5 && slice(f, length(f) - 5) == '.json', slice(f, 0, length(f) - 5), f);
 
 lb_exec(c) -> (
     opn = c:'op';
@@ -90,6 +95,8 @@ lb_exec(c) -> (
             opn == 'block', lb_block_at(c),
             opn == 'give', lb_give(c),
             opn == 'select', lb_select(c),
+            opn == 'run', lb_run(c),
+            opn == 'terrain', lb_terrain(c),
             opn == 'ping', {'ok' -> true},
             {'error' -> 'unknown op ' + opn}
         ),
@@ -153,6 +160,50 @@ lb_tp(c) -> (
     )
 );
 
+// Runs vanilla commands for an AI player. LANBridge already checked them; the
+// first-word blocklist here is a second line of defense.
+lb_cmd_ok(cmd) -> (
+    w = lower(replace(split(' ', cmd):0, '^/', ''));
+    w = replace(w, '^minecraft:', '');
+    first(global_blocked, _ == w) == null
+);
+
+lb_run(c) -> (
+    if (lb_fake(c:'name') == null, return({'error' -> 'no such AI player'}));
+    results = [];
+    for (c:'commands',
+        cmd = _;
+        if (lb_cmd_ok(cmd),
+            r = run(if (c:'as_bot', str('execute as %s at %s run %s', c:'name', c:'name', cmd), cmd));
+            results += {'ok' -> r:2 == null, 'error' -> if (r:2, str(r:2), '')},
+            results += {'ok' -> false, 'error' -> 'that command is blocked'}
+        )
+    );
+    {'ok' -> true, 'results' -> results}
+);
+
+// Surveys the ground around a build site: for each column, the height and
+// name of the topmost solid or liquid block (trees count, leaves don't).
+lb_terrain(c) -> (
+    rad = min(max(c:'radius', 4), 20);
+    x0 = c:'x';
+    z0 = c:'z';
+    in_dimension(c:'dim',
+        cells = [];
+        for (range(-rad, rad + 1),
+            dz = _;
+            for (range(-rad, rad + 1),
+                cx = x0 + _;
+                cz = z0 + dz;
+                ty = top('terrain', [cx, 0, cz]);
+                if (!solid([cx, ty, cz]) && !liquid([cx, ty, cz]), ty = ty - 1);
+                cells += [ty, str(block([cx, ty, cz]))]
+            )
+        );
+        cells
+    )
+);
+
 lb_item(h) -> if (h == null, null, {'item' -> h:0, 'count' -> h:1});
 
 lb_inv(p) -> (
@@ -170,7 +221,7 @@ lb_inv(p) -> (
 
 lb_players() -> map(filter(player('all'), _~'player_type' != 'fake'),
     pp = _~'pos';
-    {'name' -> _~'name', 'x' -> pp:0, 'y' -> pp:1, 'z' -> pp:2, 'dim' -> _~'dimension', 'host' -> lb_is_host(_)}
+    {'name' -> _~'name', 'x' -> pp:0, 'y' -> pp:1, 'z' -> pp:2, 'yaw' -> _~'yaw', 'dim' -> _~'dimension', 'host' -> lb_is_host(_)}
 );
 
 lb_state(c) -> (

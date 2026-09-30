@@ -69,7 +69,11 @@ Bring GPT, Claude, Grok or Gemini into your world as players. They show up like 
 !ai list
 ```
 
-Talk to one by saying its name ("Claude_1, get me some wood"). Once you're talking with one, follow-ups go to it automatically for a minute or so. Messages that don't mention an AI player aren't sent anywhere. By default only the host can add or remove AI players; change that and the per-minute reply limit under **Limits**.
+Talk to one by saying its name ("Claude_1, get me some wood"). Once you're talking with one, follow-ups go to it automatically for a minute or so. Chat that doesn't name anyone gets answered by the closest AI player (turn that off under **Permissions and limits**). AI players never answer each other, so they can't get stuck talking in circles.
+
+**Commands and building:** AI players can run Minecraft commands ("Claude_1, make it day and clear the weather") and build ("GPT_1, build me a small stone house with a door"). Builds go on the ground a few blocks in front of whoever asked. The AI player first surveys the terrain (heights, water, trees, existing buildings), then a design step plans the whole build with proper foundations, roofs and details, places it with fill and setblock, and fixes any steps the game rejects. Big builds take a minute or two on slower models, and the AI players page shows the progress. By default only the host can ask for commands or builds; you can allow everyone or no one under **Permissions and limits**. Commands run with operator powers, but anything that could take over or break the world (op, deop, stop, ban, kick, whitelist, reload, script, carpet, function and similar) is always blocked, including when it's hidden inside /execute.
+
+By default only the host can add or remove AI players from chat; you can change that, and the per-minute reply limit, in the same place.
 
 **Paying for the models:**
 
@@ -82,7 +86,7 @@ Talk to one by saying its name ("Claude_1, get me some wood"). Once you're talki
 
 API keys are saved only on your computer, in LANBridge's settings file. When an AI player replies, the message, recent chat and a short description of its surroundings go to that model's provider.
 
-**Current limits:** AI players steer toward targets in a straight line (hopping over blocks) rather than pathfinding, so they teleport to catch up if they get stuck or fall far behind. They can't craft or build yet. The in-game script is `lanbridge.sc`; it only ever controls Carpet fake players, never real ones.
+**Current limits:** AI players steer toward targets in a straight line (hopping over blocks) rather than pathfinding, so they teleport to catch up if they get stuck or fall far behind. They build with commands, not block by block, and can't craft yet. The in-game script is `lanbridge.sc`; it only ever controls Carpet fake players, never real ones.
 
 ## Relays
 

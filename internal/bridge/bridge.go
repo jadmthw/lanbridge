@@ -29,6 +29,13 @@ var Script []byte
 // AppName is the Scarpet app's name, as typed in /script load.
 const AppName = "lanbridge"
 
+// ScriptVersion is the version of lanbridge.sc this LANBridge expects; the
+// script reports its own in hello.json.
+const ScriptVersion = 3
+
+// ErrOldScript explains errors from a script that predates a feature.
+var ErrOldScript = errors.New("the LANBridge script in your world is out of date. On the AI players page click Reinstall, then run /script load lanbridge in the game")
+
 // Hello is the app's heartbeat.
 type Hello struct {
 	V       int      `json:"v"`
@@ -60,11 +67,21 @@ func (f *Flag) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// ErrPaused means the game isn't ticking, so it can't run commands right now.
+var ErrPaused = errors.New("Minecraft is paused. Single-player worlds pause when you switch to another window, so go back to the game, or open the world to LAN (or press F3+P in game) so it keeps running in the background")
+
 // ErrClosed is returned once the world has closed or the bridge was stopped.
 var ErrClosed = errors.New("the Minecraft world isn't connected")
 
-// Stale is how long without a heartbeat before the world counts as closed.
+// Stale is how fresh a heartbeat must be to connect to a world.
 const Stale = 12 * time.Second
+
+// Gone is how long a connected world may stay silent (paused, loading)
+// before it counts as closed.
+const Gone = 2 * time.Minute
+
+// PausedAfter is how long without a heartbeat before the game counts as paused.
+const PausedAfter = 3 * time.Second
 
 // Client is a live connection to one world.
 type Client struct {
@@ -84,6 +101,7 @@ type Client struct {
 	waiters map[int64]chan json.RawMessage
 	kick    chan struct{}
 	err     error
+	beat    time.Time
 }
 
 // Open starts talking to the app whose data folder is dir.
@@ -98,7 +116,7 @@ func Open(dir string, log *logx.Logger) (*Client, error) {
 		}
 	}
 	c := &Client{Dir: dir, World: h.World, log: log, events: make(chan Event, 256), done: make(chan struct{}),
-		stamp: fmt.Sprintf("%013d", time.Now().UnixMilli()), waiters: map[int64]chan json.RawMessage{}, kick: make(chan struct{}, 1)}
+		stamp: fmt.Sprintf("%013d", time.Now().UnixMilli()), waiters: map[int64]chan json.RawMessage{}, kick: make(chan struct{}, 1), beat: time.Now()}
 	// Events written before we connected are old news.
 	if old, _ := filepath.Glob(filepath.Join(dir, "out", "*.json")); len(old) > 0 {
 		for _, f := range old {
@@ -129,6 +147,17 @@ func ReadHello(dir string) (Hello, error) {
 	}
 	return h, nil
 }
+
+// LastBeat is when the game last wrote its heartbeat.
+func (c *Client) LastBeat() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.beat
+}
+
+// Paused reports whether the game has stopped ticking for a moment, which
+// is what single-player Minecraft does when it isn't in focus.
+func (c *Client) Paused() bool { return time.Since(c.LastBeat()) > PausedAfter }
 
 // Events delivers chat, join, leave and death events.
 func (c *Client) Events() <-chan Event { return c.events }
@@ -190,8 +219,11 @@ func (c *Client) Call(ctx context.Context, op string, args map[string]any, out a
 	c.pending = append(c.pending, cmd)
 	c.mu.Unlock()
 	c.wake()
-	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 6*time.Second) // callers with heavier work pass their own deadline
+		defer cancel()
+	}
 	select {
 	case data, ok := <-ch:
 		if !ok {
@@ -201,6 +233,9 @@ func (c *Client) Call(ctx context.Context, op string, args map[string]any, out a
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(data, &e) == nil && e.Error != "" {
+			if strings.HasPrefix(e.Error, "unknown op") {
+				return ErrOldScript
+			}
 			return errors.New(e.Error)
 		}
 		if out != nil {
@@ -212,7 +247,10 @@ func (c *Client) Call(ctx context.Context, op string, args map[string]any, out a
 		delete(c.waiters, id)
 		c.mu.Unlock()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return errors.New("Minecraft didn't answer (is the game paused or the world closed?)")
+			if c.Paused() {
+				return ErrPaused
+			}
+			return errors.New("Minecraft didn't answer. If you typed /script load lanbridge, check the game chat for a red error message")
 		}
 		return ctx.Err()
 	case <-c.done:
@@ -243,8 +281,16 @@ func (c *Client) loop() {
 			c.readEvents()
 			if time.Since(lastHello) > time.Second {
 				lastHello = time.Now()
-				if _, err := ReadHello(c.Dir); err != nil {
+				st, err := os.Stat(filepath.Join(c.Dir, "hello.json"))
+				if err != nil {
 					c.fail(fmt.Errorf("%w: %v", ErrClosed, err))
+					return
+				}
+				c.mu.Lock()
+				c.beat = st.ModTime()
+				c.mu.Unlock()
+				if time.Since(st.ModTime()) > Gone {
+					c.fail(fmt.Errorf("%w: no heartbeat for %s", ErrClosed, time.Since(st.ModTime()).Round(time.Second)))
 					return
 				}
 			}
