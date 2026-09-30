@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>LANBridge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='1' y='7' width='22' height='4' fill='%23d9824b'/%3E%3Crect x='3' y='11' width='4' height='11' fill='%235fb8a5'/%3E%3Crect x='17' y='11' width='4' height='11' fill='%235fb8a5'/%3E%3Crect x='7' y='11' width='2' height='2' fill='%23d9824b'/%3E%3Crect x='15' y='11' width='2' height='2' fill='%23d9824b'/%3E%3C/svg%3E">
+<style>
+:root {
+  --slate: #1e2025;
+  --slate-2: #272a31;
+  --slate-3: #31353d;
+  --well: #15171b;
+  --line: #3d414b;
+  --text: #ece7df;
+  --muted: #a49f97;
+  --faint: #7a766f;
+  --copper: #d9824b;
+  --copper-hi: #eb9764;
+  --copper-lo: #9a5528;
+  --verdigris: #5fb8a5;
+  --gold: #e3b54f;
+  --redstone: #e0685a;
+  --sans: ui-rounded, "SF Pro Rounded", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans", Ubuntu, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--slate); }
+body {
+  margin: 0; color: var(--text); font: 15px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--copper-hi); }
+:focus-visible { outline: 2px solid var(--copper-hi); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 48px; }
+.top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand svg { width: 34px; height: 34px; }
+.navlink { color: var(--text); font-weight: 700; font-size: 14px; text-decoration: none; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); }
+.navlink:hover { background: var(--slate-3); }
+.wordmark { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; background: var(--well); border-radius: 12px; margin-bottom: 18px; }
+.tab { border: 0; background: transparent; padding: 11px 12px; border-radius: 8px; font-weight: 700; color: var(--muted); cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { background: var(--slate-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--copper); }
+
+.panel { background: var(--slate-2); border: 1px solid var(--line); border-radius: 14px; padding: 26px; }
+.panel + .panel { margin-top: 16px; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; font-weight: 800; }
+h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 700; }
+.lede { color: var(--muted); margin: 0 0 20px; max-width: 56ch; }
+.block { padding-top: 20px; margin-top: 20px; border-top: 1px solid var(--line); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.hint { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; max-width: 60ch; }
+.error { color: var(--redstone); margin: 10px 0 0; }
+
+.steps { counter-reset: step; list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 12px; }
+.steps li { counter-increment: step; position: relative; padding-left: 38px; }
+.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  display: grid; place-items: center; font-weight: 800; font-size: 13px;
+  background: var(--copper); color: #1e1308; border-radius: 4px; box-shadow: inset 0 -3px 0 var(--copper-lo);
+}
+kbd {
+  font: 12px/1 var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--slate-3);
+  border: 1px solid var(--line); border-bottom-width: 3px;
+}
+
+.btn {
+  border: 0; border-radius: 8px; padding: 11px 18px; font-weight: 700; cursor: pointer;
+  transition: background-color .12s, transform .06s, box-shadow .06s;
+}
+.btn:disabled { opacity: .45; cursor: default; }
+.primary { background: var(--copper); color: #1e1308; box-shadow: 0 3px 0 var(--copper-lo); }
+.primary:hover:not(:disabled) { background: var(--copper-hi); }
+.primary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--copper-lo); }
+.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+.ghost:hover:not(:disabled) { background: var(--slate-3); }
+.small { padding: 7px 12px; font-size: 13.5px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--copper-hi); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* The inventory-slot look: dark top-left edge, light bottom-right edge. */
+.slot {
+  background: var(--well); border: 2px solid; border-color: #0b0c0f #4b505b #4b505b #0b0c0f;
+  border-radius: 4px; box-shadow: inset 0 2px 0 rgba(0,0,0,.35);
+}
+.code {
+  font: 15px/1.5 var(--mono); padding: 14px 16px; margin-bottom: 14px; word-break: break-all;
+  user-select: all; color: #f6f1e8; min-height: 54px; cursor: text;
+}
+.code.pending { color: var(--faint); user-select: none; font-family: var(--sans); }
+textarea.slot, input.slot { width: 100%; padding: 12px 14px; font-family: var(--mono); font-size: 14.5px; resize: vertical; }
+input.slot { font-family: var(--sans); }
+.inline { display: inline-block; font: 14px/1.2 var(--mono); padding: 5px 9px; margin: 2px 4px 2px 0; user-select: all; }
+
+.sq { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; background: var(--faint); }
+.sq.ok { background: var(--verdigris); }
+.sq.wait { background: var(--gold); animation: blink 1.2s steps(2, jump-none) infinite; }
+.sq.bad { background: var(--redstone); }
+@keyframes blink { 50% { opacity: .35; } }
+
+.checks, .players, .worlds { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.checks li { display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start; }
+.checks .sq { margin-top: 7px; }
+.checks b { display: block; }
+.checks span { color: var(--muted); font-size: 14px; }
+.players li, .worlds li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.meta { color: var(--muted); font-size: 13.5px; }
+.empty { color: var(--muted); }
+.world { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0; }
+.world b { font-size: 17px; }
+.manual { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.manual label { color: var(--muted); font-size: 14px; }
+.manual input { width: 120px; }
+
+.statusline { display: flex; gap: 10px; align-items: baseline; margin: 0 0 4px; }
+.statusline .sq { transform: translateY(-1px); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 0; }
+.stats div { background: var(--well); border-radius: 8px; padding: 10px 12px; }
+.stats dt { color: var(--muted); font-size: 12.5px; }
+.stats dd { margin: 2px 0 0; font-weight: 700; }
+
+details.more { margin-top: 16px; background: var(--slate-2); border: 1px solid var(--line); border-radius: 14px; }
+details.more summary { cursor: pointer; padding: 16px 22px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::after { content: "+"; color: var(--muted); font-weight: 400; }
+details.more[open] summary::after { content: "−"; }
+.more .inner { padding: 0 22px 22px; }
+.field { display: grid; gap: 6px; margin-bottom: 16px; }
+.field label { font-weight: 700; font-size: 14px; }
+.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.check input { margin-top: 5px; accent-color: var(--copper); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.log { list-style: none; margin: 0; padding: 12px; max-height: 300px; overflow: auto; font: 12.5px/1.6 var(--mono); background: var(--well); border-radius: 8px; }
+.log .t { color: var(--faint); margin-right: 8px; }
+.log .warn, .log .error { color: var(--gold); }
+.log .error { color: var(--redstone); }
+
+footer { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; color: var(--faint); font-size: 13px; gap: 12px; flex-wrap: wrap; }
+.banner {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100% - 40px);
+  background: var(--slate-3); border: 1px solid var(--line); border-left: 4px solid var(--redstone);
+  padding: 12px 16px; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+}
+.toast { border-left-color: var(--verdigris); }
+.cover { position: fixed; inset: 0; background: var(--slate); display: grid; place-items: center; text-align: center; padding: 20px; }
+
+@media (max-width: 560px) {
+  .panel { padding: 20px; }
+  .two { grid-template-columns: 1fr; }
+  h1 { font-size: 23px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="7" width="22" height="4" fill="#d9824b"/><rect x="3" y="11" width="4" height="11" fill="#5fb8a5"/><rect x="17" y="11" width="4" height="11" fill="#5fb8a5"/><rect x="7" y="11" width="2" height="2" fill="#d9824b"/><rect x="15" y="11" width="2" height="2" fill="#d9824b"/></svg>
+      <span class="wordmark">LANBridge</span>
+    </div>
+    <div class="row"><a class="navlink" id="ai-link" href="/ai">AI players</a><span class="chip" id="chip"><span class="sq" id="chip-sq"></span><span id="chip-text">Starting…</span></span></div>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="What do you want to do?">
+    <button class="tab" role="tab" id="tab-host" aria-selected="true" aria-controls="host-idle">Host my world</button>
+    <button class="tab" role="tab" id="tab-join" aria-selected="false" aria-controls="join-idle">Join a friend</button>
+  </div>
+
+  <section class="panel" id="host-idle" role="tabpanel">
+    <h1>Play your world with friends</h1>
+    <p class="lede">Friends join your single-player world over the internet as if they were on your Wi-Fi. No server to rent, no mods.</p>
+    <ol class="steps">
+      <li>In Minecraft, open your world, press <kbd>Esc</kbd> and choose <b>Open to LAN</b>, then <b>Start LAN World</b>.</li>
+      <li>Start hosting here, then send your friends the invite code.</li>
+    </ol>
+    <p class="error" id="host-note" hidden></p>
+    <button class="btn primary" id="host-start">Start hosting</button>
+  </section>
+
+  <section class="panel" id="host-live" hidden>
+    <div class="row between">
+      <h1>You're hosting</h1>
+      <button class="btn ghost small" id="host-stop">Stop hosting</button>
+    </div>
+    <div class="block" style="border-top:0;margin-top:4px;padding-top:8px">
+      <h2>World</h2>
+      <div id="world-box"></div>
+    </div>
+    <div class="block">
+      <h2>Invite code</h2>
+      <div class="slot code pending" id="code" tabindex="0" aria-live="polite">Checking your network…</div>
+      <div class="row">
+        <button class="btn primary" id="copy-code" disabled>Copy invite code</button>
+        <button class="btn ghost small" id="new-code">Make a new code</button>
+      </div>
+      <p class="hint">Anyone with this code can join while you host. It stays the same next time, so friends can reuse it. Make a new one to shut out old invites.</p>
+    </div>
+    <div class="block">
+      <h2>How friends reach you</h2>
+      <ul class="checks" id="routes"></ul>
+    </div>
+    <div class="block">
+      <h2>Playing now</h2>
+      <ul class="players" id="players"></ul>
+    </div>
+  </section>
+
+  <section class="panel" id="join-idle" role="tabpanel" hidden>
+    <h1>Join a friend's world</h1>
+    <p class="lede">Paste the invite code your friend sent you. You don't need to change anything else.</p>
+    <label for="join-code" class="sr">Invite code</label>
+    <textarea id="join-code" class="slot" rows="3" placeholder="LB1-…" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+    <p class="error" id="join-error" hidden></p>
+    <div class="row" style="margin-top:14px"><button class="btn primary" id="join-start">Join</button></div>
+  </section>
+
+  <section class="panel" id="join-live" hidden>
+    <div class="row between">
+      <h1 id="join-title">Joining…</h1>
+      <button class="btn ghost small" id="join-stop">Leave</button>
+    </div>
+    <p class="statusline"><span class="sq" id="join-sq"></span><span id="join-status">Reaching your friend…</span></p>
+    <div class="block">
+      <h2>In Minecraft</h2>
+      <ol class="steps" style="margin-bottom:0">
+        <li>Open <b>Multiplayer</b>. <span id="lan-line">The world shows up at the bottom of the list, under the LAN heading, once it's open.</span></li>
+        <li>If it doesn't show up, choose <b>Direct Connection</b> and enter <span class="slot inline" id="local-addr">localhost</span> <button class="btn ghost small" id="copy-addr">Copy</button></li>
+      </ol>
+    </div>
+    <div class="block">
+      <dl class="stats" id="join-stats"></dl>
+    </div>
+  </section>
+
+  <details class="more" id="settings-box">
+    <summary>Settings</summary>
+    <div class="inner">
+      <div class="field">
+        <label for="s-name">Your name</label>
+        <input class="slot" id="s-name" maxlength="24" autocomplete="off">
+        <span class="hint" style="margin:0">Friends see this while connecting.</span>
+      </div>
+      <div class="field">
+        <label for="s-relay">Relay address</label>
+        <input class="slot" id="s-relay" placeholder="tcp://203.0.113.7:7777 or wss://relay.example.com" autocomplete="off" spellcheck="false">
+        <span class="hint" style="margin:0" id="s-relay-hint">A relay lets friends join when a direct connection can't get through, like on school, dorm or mobile networks. Only the host needs it; it's built into the invite code.</span>
+      </div>
+      <div class="field">
+        <label for="s-token">Relay access token <span class="meta">(if your relay has one)</span></label>
+        <input class="slot" id="s-token" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="two">
+        <div class="field">
+          <label for="s-hostport">Hosting port</label>
+          <input class="slot" id="s-hostport" type="number" min="1" max="65535">
+        </div>
+        <div class="field">
+          <label for="s-joinport">Port for Minecraft when joining</label>
+          <input class="slot" id="s-joinport" type="number" min="1" max="65535">
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="s-upnp"><span>Ask my router to open the hosting port automatically (UPnP)</span></label>
+      <label class="check"><input type="checkbox" id="s-forward"><span>I forwarded the hosting port on my router myself</span></label>
+      <label class="check"><input type="checkbox" id="s-sharelan"><span>When joining, let other devices on my network join too</span></label>
+      <div class="row">
+        <button class="btn primary small" id="s-save">Save settings</button>
+        <span class="meta" id="s-note">Changes apply the next time you host or join.</span>
+      </div>
+    </div>
+  </details>
+
+  <details class="more" id="log-box">
+    <summary>Activity</summary>
+    <div class="inner"><ol class="log" id="log"></ol></div>
+  </details>
+
+  <footer>
+    <span id="about"></span>
+    <button class="btn ghost small" id="quit">Quit LANBridge</button>
+  </footer>
+</div>
+
+<div class="banner" id="offline" role="alert" hidden>LANBridge isn't running. Start it again and this page reconnects.</div>
+<div class="banner toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="cover" id="noauth" hidden>
+  <div>
+    <h1>Open LANBridge from its window</h1>
+    <p class="lede">This page needs the link LANBridge opens for you.</p>
+    <button class="btn primary" id="reopen">Open the control panel</button>
+  </div>
+</div>
+<div class="cover" id="bye" hidden><div><h1>LANBridge has quit</h1><p class="lede">You can close this tab.</p></div></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const token = location.hash.slice(1);
+$("ai-link").href = "/ai#" + token;
+let view = null;
+let last = null;
+let failures = 0;
+let settingsFilled = false;
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+const sq = (state) => el("span", { class: "sq " + (state || "") });
+
+async function api(path, body) {
+  const opts = { headers: { "X-LANBridge-Token": token } };
+  if (body !== undefined) {
+    opts.method = "POST";
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 3200);
+}
+
+async function act(path, body, onError) {
+  try {
+    await api(path, body || {});
+    await refresh();
+    return true;
+  } catch (e) {
+    (onError || toast)(e.message);
+    return false;
+  }
+}
+
+async function copy(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = el("textarea", {}, text);
+    document.body.append(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  toast(what + " copied");
+}
+
+function bytes(n) {
+  if (n < 1024) return n + " B";
+  const u = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+  return n.toFixed(n < 10 ? 1 : 0) + " " + u[i];
+}
+function since(ts) {
+  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + " min";
+  return Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+
+function setView(v) {
+  view = v;
+  $("tab-host").setAttribute("aria-selected", v === "host");
+  $("tab-join").setAttribute("aria-selected", v === "join");
+  if (last) render(last);
+}
+
+function render(s) {
+  if (view === null) view = s.mode === "join" ? "join" : "host";
+  const hosting = s.mode === "host", joined = s.mode === "join";
+  $("host-idle").hidden = !(view === "host" && !hosting);
+  $("host-live").hidden = !(view === "host" && hosting);
+  $("join-idle").hidden = !(view === "join" && !joined);
+  $("join-live").hidden = !(view === "join" && joined);
+  $("tab-host").setAttribute("aria-selected", view === "host");
+  $("tab-join").setAttribute("aria-selected", view === "join");
+
+  const note = $("host-note");
+  note.hidden = !joined;
+  note.textContent = joined ? "You're in a friend's game right now. Leave it to host your own." : "";
+  $("host-start").disabled = joined;
+  $("join-start").disabled = hosting;
+  if (hosting) showJoinError("You're hosting right now. Stop hosting to join a friend.");
+  else if ($("join-error").dataset.kind === "mode") showJoinError("");
+
+  let chipState = "", chipText = "Ready";
+  if (hosting) {
+    const n = s.host.players.length;
+    chipState = s.host.target ? "ok" : "wait";
+    chipText = n ? `Hosting, ${n} playing` : "Hosting";
+  } else if (joined) {
+    chipState = s.join.worldOnline ? "ok" : s.join.connected ? "wait" : "bad";
+    chipText = s.join.worldOnline ? "Connected" : s.join.connected ? "Waiting for world" : "Reconnecting";
+  }
+  $("chip-sq").className = "sq " + chipState;
+  $("chip-text").textContent = chipText;
+
+  if (hosting) renderHost(s.host);
+  if (joined) renderJoin(s.join);
+  renderSettings(s.settings);
+  renderLog(s.logs);
+  $("about").textContent = `LANBridge ${s.version} for ${({ windows: "Windows", darwin: "macOS", linux: "Linux" })[s.os] || s.os} (${s.arch})`;
+  if (!joined && !$("join-code").value && s.settings.lastCode && !$("join-code").dataset.touched) $("join-code").value = s.settings.lastCode;
+}
+
+function worldView(h) {
+  const out = [];
+  if (h.manual) {
+    out.push(el("p", { class: "world" }, sq("ok"), el("b", {}, "Port " + h.manual.split(":").pop()), el("span", { class: "meta" }, "entered by hand")));
+    out.push(el("p", { class: "hint" }, el("button", { class: "linkish", onclick: () => act("/api/host/select", { key: "" }) }, "Find the world automatically instead")));
+    return out;
+  }
+  const current = h.worlds.find((w) => w.addr === h.target);
+  if (current) {
+    out.push(el("p", { class: "world" }, sq("ok"), el("b", {}, current.motd), el("span", { class: "meta" }, current.local ? `port ${current.port}, on this computer` : `port ${current.port}, on ${current.source}`)));
+  } else {
+    out.push(el("p", { class: "world" }, sq("wait"), el("span", {}, "Waiting for a world. In Minecraft, press ", el("kbd", {}, "Esc"), " → ", el("b", {}, "Open to LAN"), " → ", el("b", {}, "Start LAN World"), ".")));
+  }
+  const others = h.worlds.filter((w) => w !== current);
+  if (others.length) {
+    out.push(el("ul", { class: "worlds", style: "margin-top:12px" }, others.map((w) =>
+      el("li", {}, el("span", {}, w.motd), el("span", { class: "meta" }, w.local ? `port ${w.port}, this computer` : `on ${w.source}`),
+        el("button", { class: "btn ghost small", onclick: () => act("/api/host/select", { key: w.key }) }, "Share this one")))));
+  }
+  if (h.detectError) out.push(el("p", { class: "hint" }, h.detectError));
+  const input = el("input", { class: "slot", id: "manual-port", type: "number", min: 1, max: 65535, placeholder: "54321", "aria-label": "Minecraft port" });
+  const use = () => {
+    const p = parseInt(input.value, 10);
+    if (p > 0 && p < 65536) act("/api/host/select", { manualPort: p });
+    else toast("Enter the port from Minecraft's chat message, like 54321");
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") use(); });
+  out.push(el("div", { class: "manual" },
+    el("label", { for: "manual-port" }, current ? "Different world? Enter its port:" : "Not detected? Enter the port Minecraft shows in chat:"),
+    input, el("button", { class: "btn ghost small", onclick: use }, "Use port")));
+  return out;
+}
+
+function renderHost(h) {
+  const box = $("world-box");
+  const key = JSON.stringify([h.target, h.manual, h.detectError, h.worlds.map((w) => [w.key, w.motd])]);
+  if (box.dataset.key !== key && document.activeElement?.id !== "manual-port") {
+    box.dataset.key = key;
+    box.replaceChildren(...worldView(h));
+  }
+  const code = $("code");
+  if (h.ready && h.code) {
+    if (code.textContent !== h.code) code.textContent = h.code;
+    code.classList.remove("pending");
+    $("copy-code").disabled = false;
+  } else {
+    code.textContent = "Checking your network…";
+    code.classList.add("pending");
+    $("copy-code").disabled = true;
+  }
+  $("routes").replaceChildren(...h.routes.map((r) => el("li", {}, sq(r.state), el("div", {}, el("b", {}, r.title), el("span", {}, r.detail)))));
+  const pl = $("players");
+  if (!h.players.length) pl.replaceChildren(el("li", { class: "empty" }, "Nobody yet. Friends show up here when they join."));
+  else pl.replaceChildren(...h.players.map((p) => el("li", {}, sq("ok"), el("b", {}, p.name), el("span", { class: "meta" }, `${p.via}, ${since(p.since)}`))));
+}
+
+function renderJoin(j) {
+  const name = j.hostName || "your friend";
+  let title, line, state;
+  if (!j.checked) { title = `Joining ${name}`; line = "Reaching " + name + "…"; state = "wait"; }
+  else if (!j.connected) { title = `Joining ${name}`; line = `Can't reach ${name} right now: ${j.error}. Trying again every few seconds.`; state = "bad"; }
+  else if (!j.worldOnline) { title = `Connected to ${name}`; line = `${name} hasn't opened a world yet. Ask them to press Esc → Open to LAN in Minecraft.`; state = "wait"; }
+  else { title = j.motd || `${name}'s world`; line = `Connected ${j.route}, ${j.pingMs} ms.`; state = "ok"; }
+  $("join-title").textContent = title;
+  $("join-status").textContent = line;
+  $("join-sq").className = "sq " + state;
+  $("lan-line").textContent = j.worldOnline
+    ? `“${j.motd}” shows up at the bottom of the list, under the LAN heading. Double-click it.`
+    : "The world shows up at the bottom of the list, under the LAN heading, once it's open.";
+  $("local-addr").textContent = j.localAddr;
+  const stats = [
+    ["In game", j.sessions > 0 ? "Yes" : "Not yet"],
+    ["Players in world", j.connected ? String(j.hostPlayers) : "?"],
+    ["Sent", bytes(j.bytesUp)],
+    ["Received", bytes(j.bytesDown)],
+  ];
+  $("join-stats").replaceChildren(...stats.map(([k, v]) => el("div", {}, el("dt", {}, k), el("dd", {}, v))));
+}
+
+function fillSettings(st) {
+  $("s-name").value = st.name;
+  $("s-relay").value = st.relayUrl || "";
+  $("s-token").value = st.relayToken || "";
+  $("s-hostport").value = st.hostPort;
+  $("s-joinport").value = st.joinPort || 25565;
+  $("s-upnp").checked = st.upnp;
+  $("s-forward").checked = st.manualForward;
+  $("s-sharelan").checked = st.shareLan;
+  settingsFilled = true;
+}
+function renderSettings(st) {
+  if (!settingsFilled) fillSettings(st);
+}
+
+let logKey = "";
+function renderLog(logs) {
+  const k = logs.length ? logs[logs.length - 1].time + logs.length : "";
+  if (k === logKey) return;
+  logKey = k;
+  const box = $("log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  box.replaceChildren(...logs.map((e) => el("li", { class: e.level }, el("span", { class: "t" }, new Date(e.time).toLocaleTimeString()), e.msg)));
+  if (!logs.length) box.replaceChildren(el("li", { class: "empty" }, "Nothing yet."));
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function showJoinError(msg, kind) {
+  const e = $("join-error");
+  e.textContent = msg;
+  e.hidden = !msg;
+  e.dataset.kind = msg ? kind || "mode" : "";
+}
+
+async function refresh() {
+  try {
+    last = await api("/api/state");
+    failures = 0;
+    $("offline").hidden = true;
+    render(last);
+  } catch (e) {
+    if (e.message && /access link/.test(e.message)) { $("noauth").hidden = false; return; }
+    if (++failures >= 3) $("offline").hidden = false;
+  }
+}
+
+async function loop() {
+  await refresh();
+  setTimeout(loop, 1000);
+}
+
+$("tab-host").addEventListener("click", () => setView("host"));
+$("tab-join").addEventListener("click", () => setView("join"));
+$("host-start").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  await act("/api/host/start", {});
+  e.target.disabled = false;
+});
+$("host-stop").addEventListener("click", () => act("/api/host/stop"));
+$("copy-code").addEventListener("click", () => copy($("code").textContent, "Invite code"));
+$("new-code").addEventListener("click", () => {
+  if (confirm("Make a new invite code? The current code stops working, and friends will need the new one.")) act("/api/host/newcode");
+});
+$("join-code").addEventListener("input", (e) => { e.target.dataset.touched = "1"; if ($("join-error").dataset.kind === "code") showJoinError(""); });
+$("join-code").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("join-start").click(); } });
+$("join-start").addEventListener("click", async (e) => {
+  const code = $("join-code").value.trim();
+  if (!code) { showJoinError("Paste the invite code first.", "code"); return; }
+  e.target.disabled = true;
+  await act("/api/join/start", { code }, (msg) => showJoinError(msg, "code"));
+  e.target.disabled = false;
+});
+$("join-stop").addEventListener("click", () => act("/api/join/stop"));
+$("copy-addr").addEventListener("click", () => copy($("local-addr").textContent, "Address"));
+$("settings-box").addEventListener("toggle", (e) => { if (e.target.open && last) fillSettings(last.settings); });
+$("s-save").addEventListener("click", async () => {
+  const num = (id) => parseInt($(id).value, 10) || 0;
+  const ok = await act("/api/settings", {
+    name: $("s-name").value, relayUrl: $("s-relay").value, relayToken: $("s-token").value,
+    hostPort: num("s-hostport"), joinPort: num("s-joinport"),
+    upnp: $("s-upnp").checked, manualForward: $("s-forward").checked, shareLan: $("s-sharelan").checked,
+  });
+  if (ok) {
+    fillSettings(last.settings);
+    toast(last.mode === "idle" ? "Settings saved" : "Settings saved. They apply the next time you host or join.");
+  }
+});
+$("quit").addEventListener("click", async () => {
+  if (last && last.mode !== "idle" && !confirm("Quit LANBridge? Everyone connected through it will be disconnected.")) return;
+  try { await api("/api/quit", {}); } catch {}
+  $("bye").hidden = false;
+});
+$("reopen").addEventListener("click", () => fetch("/api/focus", { method: "POST", headers: { "X-LANBridge-Focus": "1" } }));
+
+if (!token) $("noauth").hidden = false;
+else { history.replaceState(null, "", "/#" + token); loop(); }
+</script>
+</body>
+</html>

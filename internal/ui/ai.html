@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI players - LANBridge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='1' y='7' width='22' height='4' fill='%23d9824b'/%3E%3Crect x='3' y='11' width='4' height='11' fill='%235fb8a5'/%3E%3Crect x='17' y='11' width='4' height='11' fill='%235fb8a5'/%3E%3C/svg%3E">
+<style>
+:root {
+  --slate: #1e2025;
+  --slate-2: #272a31;
+  --slate-3: #31353d;
+  --well: #15171b;
+  --line: #3d414b;
+  --text: #ece7df;
+  --muted: #a49f97;
+  --faint: #7a766f;
+  --copper: #d9824b;
+  --copper-hi: #eb9764;
+  --copper-lo: #9a5528;
+  --verdigris: #5fb8a5;
+  --gold: #e3b54f;
+  --redstone: #e0685a;
+  --sans: ui-rounded, "SF Pro Rounded", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans", Ubuntu, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--slate); }
+body {
+  margin: 0; color: var(--text); font: 15px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--copper-hi); }
+:focus-visible { outline: 2px solid var(--copper-hi); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 48px; }
+.top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand svg { width: 34px; height: 34px; }
+.navlink { color: var(--text); font-weight: 700; font-size: 14px; text-decoration: none; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); }
+.navlink:hover { background: var(--slate-3); }
+.wordmark { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; background: var(--well); border-radius: 12px; margin-bottom: 18px; }
+.tab { border: 0; background: transparent; padding: 11px 12px; border-radius: 8px; font-weight: 700; color: var(--muted); cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { background: var(--slate-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--copper); }
+
+.panel { background: var(--slate-2); border: 1px solid var(--line); border-radius: 14px; padding: 26px; }
+.panel + .panel { margin-top: 16px; }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; font-weight: 800; }
+h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 700; }
+.lede { color: var(--muted); margin: 0 0 20px; max-width: 56ch; }
+.block { padding-top: 20px; margin-top: 20px; border-top: 1px solid var(--line); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.hint { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; max-width: 60ch; }
+.error { color: var(--redstone); margin: 10px 0 0; }
+
+.steps { counter-reset: step; list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 12px; }
+.steps li { counter-increment: step; position: relative; padding-left: 38px; }
+.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  display: grid; place-items: center; font-weight: 800; font-size: 13px;
+  background: var(--copper); color: #1e1308; border-radius: 4px; box-shadow: inset 0 -3px 0 var(--copper-lo);
+}
+kbd {
+  font: 12px/1 var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--slate-3);
+  border: 1px solid var(--line); border-bottom-width: 3px;
+}
+
+.btn {
+  border: 0; border-radius: 8px; padding: 11px 18px; font-weight: 700; cursor: pointer;
+  transition: background-color .12s, transform .06s, box-shadow .06s;
+}
+.btn:disabled { opacity: .45; cursor: default; }
+.primary { background: var(--copper); color: #1e1308; box-shadow: 0 3px 0 var(--copper-lo); }
+.primary:hover:not(:disabled) { background: var(--copper-hi); }
+.primary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--copper-lo); }
+.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+.ghost:hover:not(:disabled) { background: var(--slate-3); }
+.small { padding: 7px 12px; font-size: 13.5px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--copper-hi); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+/* The inventory-slot look: dark top-left edge, light bottom-right edge. */
+.slot {
+  background: var(--well); border: 2px solid; border-color: #0b0c0f #4b505b #4b505b #0b0c0f;
+  border-radius: 4px; box-shadow: inset 0 2px 0 rgba(0,0,0,.35);
+}
+.code {
+  font: 15px/1.5 var(--mono); padding: 14px 16px; margin-bottom: 14px; word-break: break-all;
+  user-select: all; color: #f6f1e8; min-height: 54px; cursor: text;
+}
+.code.pending { color: var(--faint); user-select: none; font-family: var(--sans); }
+textarea.slot, input.slot { width: 100%; padding: 12px 14px; font-family: var(--mono); font-size: 14.5px; resize: vertical; }
+input.slot { font-family: var(--sans); }
+.inline { display: inline-block; font: 14px/1.2 var(--mono); padding: 5px 9px; margin: 2px 4px 2px 0; user-select: all; }
+
+.sq { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; background: var(--faint); }
+.sq.ok { background: var(--verdigris); }
+.sq.wait { background: var(--gold); animation: blink 1.2s steps(2, jump-none) infinite; }
+.sq.bad { background: var(--redstone); }
+@keyframes blink { 50% { opacity: .35; } }
+
+.checks, .players, .worlds { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.checks li { display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start; }
+.checks .sq { margin-top: 7px; }
+.checks b { display: block; }
+.checks span { color: var(--muted); font-size: 14px; }
+.players li, .worlds li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.meta { color: var(--muted); font-size: 13.5px; }
+.empty { color: var(--muted); }
+.world { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0; }
+.world b { font-size: 17px; }
+.manual { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.manual label { color: var(--muted); font-size: 14px; }
+.manual input { width: 120px; }
+
+.statusline { display: flex; gap: 10px; align-items: baseline; margin: 0 0 4px; }
+.statusline .sq { transform: translateY(-1px); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 0; }
+.stats div { background: var(--well); border-radius: 8px; padding: 10px 12px; }
+.stats dt { color: var(--muted); font-size: 12.5px; }
+.stats dd { margin: 2px 0 0; font-weight: 700; }
+
+details.more { margin-top: 16px; background: var(--slate-2); border: 1px solid var(--line); border-radius: 14px; }
+details.more summary { cursor: pointer; padding: 16px 22px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::after { content: "+"; color: var(--muted); font-weight: 400; }
+details.more[open] summary::after { content: "−"; }
+.more .inner { padding: 0 22px 22px; }
+.field { display: grid; gap: 6px; margin-bottom: 16px; }
+.field label { font-weight: 700; font-size: 14px; }
+.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.check input { margin-top: 5px; accent-color: var(--copper); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.log { list-style: none; margin: 0; padding: 12px; max-height: 300px; overflow: auto; font: 12.5px/1.6 var(--mono); background: var(--well); border-radius: 8px; }
+.log .t { color: var(--faint); margin-right: 8px; }
+.log .warn, .log .error { color: var(--gold); }
+.log .error { color: var(--redstone); }
+
+footer { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; color: var(--faint); font-size: 13px; gap: 12px; flex-wrap: wrap; }
+.banner {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100% - 40px);
+  background: var(--slate-3); border: 1px solid var(--line); border-left: 4px solid var(--redstone);
+  padding: 12px 16px; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
+}
+.toast { border-left-color: var(--verdigris); }
+.cover { position: fixed; inset: 0; background: var(--slate); display: grid; place-items: center; text-align: center; padding: 20px; }
+
+@media (max-width: 560px) {
+  .panel { padding: 20px; }
+  .two { grid-template-columns: 1fr; }
+  h1 { font-size: 23px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* AI players page */
+.top0 { margin-top: 0; }
+.steps li + li { margin-top: 12px; }
+.list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 10px; }
+.list li { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: var(--slate-3); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.grow { flex: 1 1 220px; min-width: 0; }
+.path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.prov { border-top: 1px solid var(--line); padding: 18px 0 6px; }
+.prov:first-child { border-top: 0; padding-top: 4px; }
+.prov-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.prov-head b { font-size: 17px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+select.slot { width: 100%; padding: 11px 12px; color: var(--text); font: inherit; }
+.said { margin-top: 6px; color: var(--text); font-style: italic; overflow-wrap: anywhere; }
+.err { margin-top: 6px; color: var(--redstone); font-size: 13.5px; overflow-wrap: anywhere; }
+details.inline { margin-top: 10px; }
+details.inline summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+details.inline .row { margin-top: 8px; flex-wrap: nowrap; }
+.toast.bad { border-left-color: var(--redstone); }
+@media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="7" width="22" height="4" fill="#d9824b"/><rect x="3" y="11" width="4" height="11" fill="#5fb8a5"/><rect x="17" y="11" width="4" height="11" fill="#5fb8a5"/><rect x="7" y="11" width="2" height="2" fill="#d9824b"/><rect x="15" y="11" width="2" height="2" fill="#d9824b"/></svg>
+      <span class="wordmark">LANBridge</span>
+    </div>
+    <a class="navlink" id="back" href="/">Back to hosting</a>
+  </header>
+
+  <section class="panel">
+    <h1>AI players</h1>
+    <p class="lede">Bring GPT, Claude, Grok or Gemini into your world as players. Everyone in the world can talk to them in chat, and they can follow you, mine, fight and hand you things.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Your world</h2>
+    <p class="statusline"><span class="sq" id="w-sq"></span><span id="w-text">Looking for a world…</span></p>
+    <div id="setup">
+      <ol class="steps">
+        <li>On the computer that hosts the world, install <a href="https://fabricmc.net/use/installer/" target="_blank" rel="noopener">Fabric</a> and the <a href="https://modrinth.com/mod/carpet" target="_blank" rel="noopener">Carpet mod</a> for your Minecraft version. Friends who join don't need them.</li>
+        <li>Add LANBridge's script to Minecraft:
+          <ul class="list" id="instances"></ul>
+          <details class="inline"><summary>My Minecraft folder isn't listed</summary>
+            <div class="row"><input class="slot" id="folder" placeholder="Paste the folder that contains saves/ and mods/" spellcheck="false"><button class="btn ghost" id="folder-add">Add</button></div>
+          </details>
+        </li>
+        <li>Open your world and type <kbd id="cmd">/script load lanbridge</kbd> in chat. LANBridge connects within a few seconds.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Models</h2>
+    <p class="hint top0">Set up the ones you want. GPT and Grok can run on your ChatGPT or SuperGrok plan; Claude and Gemini need an API key. Keys stay on this computer.</p>
+    <div id="providers"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Add an AI player</h2>
+    <div class="grid2">
+      <div class="field"><label for="sp-kind">Model</label><select class="slot" id="sp-kind"></select></div>
+      <div class="field"><label for="sp-name">Name <span class="meta">(optional)</span></label><input class="slot" id="sp-name" maxlength="16" placeholder="Claude_1" spellcheck="false"></div>
+    </div>
+    <div class="field"><label for="sp-persona">Personality <span class="meta">(optional)</span></label><input class="slot" id="sp-persona" maxlength="300" placeholder="A grumpy dwarf who loves mining"></div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="sp-creative"> Creative mode</label>
+      <button class="btn primary" id="sp-go">Add to world</button>
+    </div>
+    <p class="hint">In the game you can also type <kbd>!ai spawn claude</kbd>, <kbd>!ai remove Claude_1</kbd> or <kbd>!ai list</kbd>. To talk to one, say its name, like "Claude_1, come here".</p>
+  </section>
+
+  <section class="panel">
+    <h2>In the world</h2>
+    <ul class="list bots" id="bots"></ul>
+  </section>
+
+  <details class="more" id="limits">
+    <summary>Limits</summary>
+    <div class="inner">
+      <label class="check"><input type="checkbox" id="o-host"> Only the host can add or remove AI players from chat</label>
+      <div class="grid2">
+        <div class="field"><label for="o-max">Most AI players at once</label><input class="slot" id="o-max" type="number" min="1" max="20"></div>
+        <div class="field"><label for="o-rate">Replies per AI player per minute</label><input class="slot" id="o-rate" type="number" min="1" max="120"></div>
+      </div>
+      <p class="hint top0">Every reply is a model call, so these keep your credits or plan usage in check.</p>
+      <button class="btn ghost" id="o-save">Save limits</button>
+    </div>
+  </details>
+</div>
+<div class="banner toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="banner" id="offline" role="alert" hidden>LANBridge isn't running. Start it again, then reload this page.</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const token = location.hash.slice(1);
+$("back").href = "/#" + token;
+let st = null, failures = 0, formsBuilt = false, limitsFilled = false;
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+const sq = (s) => el("span", { class: "sq " + (s || "") });
+
+async function api(path, body) {
+  const opts = { headers: { "X-LANBridge-Token": token } };
+  if (body !== undefined) {
+    opts.method = "POST";
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+let toastTimer;
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("bad", !!bad);
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 4500);
+}
+
+async function run(btn, fn) {
+  if (btn) btn.disabled = true;
+  try { await fn(); } catch (e) { toast(e.message, true); } finally { if (btn) btn.disabled = false; }
+}
+
+function renderWorld() {
+  const setup = $("setup");
+  if (st.connected) {
+    $("w-sq").className = "sq ok";
+    const who = st.players.length ? "Players: " + st.players.join(", ") : "No players yet";
+    $("w-text").textContent = `Connected to "${st.world}". ${who}.`;
+    setup.hidden = true;
+  } else {
+    $("w-sq").className = "sq wait";
+    $("w-text").textContent = "No world connected yet. Set it up once:";
+    setup.hidden = false;
+  }
+  $("cmd").textContent = st.command;
+  const list = $("instances");
+  const items = st.instances.map((i) => el("li", {},
+    el("div", { class: "grow" }, el("b", {}, i.name), el("div", { class: "meta path" }, i.dir),
+      el("div", { class: "meta" }, i.hasCarpet ? "Carpet found" : "Carpet not found in mods/", i.installed ? ", script installed" : "")),
+    el("button", { class: "btn " + (i.installed ? "ghost" : "primary"), onclick: (e) => run(e.target, async () => {
+      const r = await api("/api/ai/install", { dir: i.dir });
+      toast("Installed. In your world, type " + st.command);
+    }) }, i.installed ? "Reinstall" : "Install script")));
+  if (!items.length) items.push(el("li", { class: "meta" }, "No Minecraft folders found. Add yours below."));
+  list.replaceChildren(...items);
+}
+
+function providerForm(p) {
+  const wrap = el("div", { class: "prov", "data-kind": p.kind });
+  const status = el("span", { class: "meta", "data-role": "status" });
+  const head = el("div", { class: "prov-head" }, el("span", { "data-role": "sq", class: "sq" }), el("b", {}, p.name), el("span", { class: "meta" }, p.vendor), status);
+  const auth = el("select", { class: "slot" },
+    p.accountCli ? el("option", { value: "account" }, "My " + p.account) : null,
+    el("option", { value: "api" }, "API key (" + p.keyNote.replace(/\.$/, "") + ")"));
+  auth.value = p.configured ? p.auth : (p.accountCli ? "account" : "api");
+  const key = el("input", { class: "slot", type: "password", autocomplete: "off", spellcheck: "false",
+    placeholder: p.hasKey ? "Saved key " + (p.keyHint || "") + ". Paste to replace." : "Paste your API key" });
+  const model = el("input", { class: "slot", spellcheck: "false", list: "models-" + p.kind, placeholder: p.defaultModel || "Leave empty for the default" });
+  model.value = p.model || "";
+  const dl = el("datalist", { id: "models-" + p.kind });
+  model.addEventListener("focus", async () => {
+    if (dl.childElementCount || !p.configured || auth.value !== "api") return;
+    try { const r = await api("/api/ai/models", { kind: p.kind }); dl.replaceChildren(...(r.models || []).map((m) => el("option", { value: m }))); } catch (e) {}
+  }, { once: false });
+  const keyRow = el("div", { class: "field" }, el("label", {}, "API key ", el("a", { href: p.keyUrl, target: "_blank", rel: "noopener" }, "get one")), key);
+  const acct = el("p", { class: "hint top0", "data-role": "acct" });
+  const note = p.accountNote ? el("p", { class: "hint top0" }, p.accountNote) : null;
+  const test = el("span", { class: "meta", "data-role": "test" });
+  const sync = () => { keyRow.hidden = auth.value !== "api"; acct.hidden = auth.value !== "account"; };
+  auth.addEventListener("change", sync);
+  sync();
+  const save = el("button", { class: "btn primary", onclick: (e) => run(e.target, async () => {
+    await api("/api/ai/provider", { kind: p.kind, auth: auth.value, apiKey: key.value, model: model.value });
+    key.value = "";
+    toast(p.name + " saved.");
+  }) }, "Save");
+  const tst = el("button", { class: "btn ghost", onclick: (e) => run(e.target, async () => {
+    await api("/api/ai/provider", { kind: p.kind, auth: auth.value, apiKey: key.value, model: model.value });
+    key.value = "";
+    test.textContent = "Testing…";
+    const r = await api("/api/ai/test", { kind: p.kind });
+    toast(p.name + ": " + r.message);
+  }) }, "Test");
+  const remove = el("button", { class: "linkish", onclick: (e) => run(null, async () => {
+    await api("/api/ai/provider", { kind: p.kind, remove: true });
+    toast(p.name + " removed.");
+  }) }, "Remove");
+  wrap.append(head, note, el("div", { class: "field" }, el("label", {}, "Pay with"), auth), keyRow, acct,
+    el("div", { class: "field" }, el("label", {}, "Model"), model, dl), el("div", { class: "row" }, save, tst, remove, test));
+  return wrap;
+}
+
+const installHints = {
+  codex: "Install OpenAI's Codex CLI (npm install -g @openai/codex), then run \"codex login\" once and sign in with ChatGPT.",
+  grok: "Install xAI's Grok Build CLI from x.ai/cli, then run \"grok login\" once.",
+};
+
+function renderProviders() {
+  const box = $("providers");
+  if (!formsBuilt) {
+    box.replaceChildren(...st.providers.map(providerForm));
+    formsBuilt = true;
+  }
+  for (const p of st.providers) {
+    const f = box.querySelector(`[data-kind="${p.kind}"]`);
+    if (!f) continue;
+    const ready = p.configured && (p.auth === "account" ? !!p.cliPath : p.hasKey);
+    f.querySelector('[data-role="sq"]').className = "sq " + (ready ? "ok" : p.configured ? "bad" : "");
+    f.querySelector('[data-role="status"]').textContent = !p.configured ? "not set up" : ready ? "ready" : (p.auth === "account" ? p.accountCli + " not found" : "needs a key");
+    const acct = f.querySelector('[data-role="acct"]');
+    if (acct) acct.textContent = p.cliPath ? `Found ${p.accountCli} at ${p.cliPath}. If you haven't yet, run "${p.accountLogin}" once in a terminal.` : (installHints[p.accountCli] || "");
+    f.querySelector('[data-role="test"]').textContent = p.lastTest || "";
+  }
+  const kind = $("sp-kind"), cur = kind.value;
+  const opts = st.providers.filter((p) => p.configured).map((p) => el("option", { value: p.kind }, p.name));
+  if (opts.length !== kind.options.length || [...kind.options].some((o, i) => o.value !== opts[i].value)) {
+    kind.replaceChildren(...(opts.length ? opts : [el("option", { value: "" }, "Set up a model first")]));
+    if (cur) kind.value = cur;
+  }
+}
+
+function renderBots() {
+  const list = $("bots");
+  if (!st.bots.length) {
+    list.replaceChildren(el("li", { class: "meta" }, "No AI players yet."));
+    return;
+  }
+  list.replaceChildren(...st.bots.map((b) => {
+    const state = b.lastError ? "bad" : b.thinking ? "wait" : b.online ? "ok" : "";
+    const bits = [b.task ? b.task : "idle"];
+    if (b.online && b.health) bits.push(`health ${Math.round(b.health)}/20`);
+    bits.push(`${b.calls} ${b.calls === 1 ? "reply" : "replies"}`);
+    if (b.tokensIn) bits.push(`${b.tokensIn + b.tokensOut} tokens`);
+    return el("li", {},
+      sq(state),
+      el("div", { class: "grow" },
+        el("b", {}, b.name), " ", el("span", { class: "meta" }, b.model),
+        el("div", { class: "meta" }, bits.join(", ")),
+        b.thinking ? el("div", { class: "meta" }, "Thinking…") : null,
+        b.lastSaid ? el("div", { class: "said" }, "\u201C" + b.lastSaid + "\u201D") : null,
+        b.lastError ? el("div", { class: "err" }, b.lastError) : null),
+      el("button", { class: "btn ghost", onclick: (e) => run(e.target, () => api("/api/ai/stop", { name: b.name })) }, "Stop task"),
+      el("button", { class: "btn ghost", onclick: (e) => run(e.target, () => api("/api/ai/remove", { name: b.name })) }, "Remove"));
+  }));
+}
+
+function renderLimits() {
+  if (limitsFilled) return;
+  limitsFilled = true;
+  $("o-host").checked = st.hostOnly;
+  $("o-max").value = st.maxBots;
+  $("o-rate").value = st.maxPerMinute;
+}
+
+async function poll() {
+  try {
+    st = await api("/api/ai/state");
+    failures = 0;
+    $("offline").hidden = true;
+    renderWorld();
+    renderProviders();
+    renderBots();
+    renderLimits();
+  } catch (e) {
+    if (++failures >= 3) $("offline").hidden = false;
+  }
+  setTimeout(poll, 1500);
+}
+
+$("sp-go").addEventListener("click", (e) => run(e.target, async () => {
+  if (!$("sp-kind").value) throw new Error("Set up a model first.");
+  const r = await api("/api/ai/spawn", { kind: $("sp-kind").value, name: $("sp-name").value.trim(),
+    persona: $("sp-persona").value.trim(), mode: $("sp-creative").checked ? "creative" : "survival" });
+  $("sp-name").value = "";
+  toast(r.name + " joined the world.");
+}));
+$("folder-add").addEventListener("click", (e) => run(e.target, async () => {
+  await api("/api/ai/folder", { dir: $("folder").value.trim() });
+  $("folder").value = "";
+  toast("Folder added.");
+}));
+$("o-save").addEventListener("click", (e) => run(e.target, async () => {
+  await api("/api/ai/options", { hostOnly: $("o-host").checked, maxBots: +$("o-max").value, maxPerMinute: +$("o-rate").value });
+  toast("Limits saved.");
+}));
+if (!token) $("offline").textContent = "Open this page from LANBridge's main window.";
+poll();
+</script>
+</body>
+</html>
